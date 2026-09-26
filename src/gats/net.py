@@ -42,10 +42,11 @@ class Fetched:
     content_type: str | None
     fetched_at: datetime
     elapsed_ms: int
+    too_large: bool = False  # body exceeded ``max_bytes``; ``content`` is empty
 
     @property
     def ok(self) -> bool:
-        return 200 <= self.status < 300
+        return 200 <= self.status < 300 and not self.too_large
 
 
 class FetchError(RuntimeError):
@@ -87,6 +88,20 @@ def _retry_after_seconds(response: httpx.Response) -> float | None:
     except (TypeError, ValueError):
         return None
     return max(0.0, (when - utcnow()).total_seconds())
+
+
+async def _read_capped(response: httpx.Response, max_bytes: int | None) -> tuple[bytes, bool]:
+    """Read the body, giving up early if it exceeds ``max_bytes``."""
+    if max_bytes is not None:
+        declared = response.headers.get("Content-Length", "")
+        if declared.isdigit() and int(declared) > max_bytes:
+            return b"", True
+    body = bytearray()
+    async for chunk in response.aiter_bytes():
+        body.extend(chunk)
+        if max_bytes is not None and len(body) > max_bytes:
+            return b"", True
+    return bytes(body), False
 
 
 class PoliteClient:
@@ -150,14 +165,17 @@ class PoliteClient:
         params: Mapping[str, str] | None = None,
         headers: Mapping[str, str] | None = None,
         warmup_url: str | None = None,
+        max_bytes: int | None = None,
     ) -> Fetched:
+        """GET with retries. With ``max_bytes``, the download is abandoned as
+        soon as the declared or received size exceeds it (``too_large``)."""
         if warmup_url:
             await self.warmup(warmup_url)
-        fetched = await self._request(url, params=params, headers=headers)
+        fetched = await self._request(url, params=params, headers=headers, max_bytes=max_bytes)
         if warmup_url and fetched.status in _WARMUP_STATUSES:
             log.info("session rejected, re-warming %s", kv(url=url, status=fetched.status))
             await self.warmup(warmup_url, force=True)
-            fetched = await self._request(url, params=params, headers=headers)
+            fetched = await self._request(url, params=params, headers=headers, max_bytes=max_bytes)
         return fetched
 
     async def _request(
@@ -166,6 +184,7 @@ class PoliteClient:
         *,
         params: Mapping[str, str] | None,
         headers: Mapping[str, str] | None,
+        max_bytes: int | None = None,
     ) -> Fetched:
         host = urlsplit(url).netloc
         last_error: str = "no attempt made"
@@ -175,24 +194,28 @@ class PoliteClient:
             started = time.monotonic()
             fetched_at = utcnow()
             try:
-                response = await self._client.get(url, params=params, headers=headers)
+                async with self._client.stream(
+                    "GET", url, params=params, headers=headers
+                ) as response:
+                    if response.status_code in _RETRY_STATUSES:
+                        last_error = f"HTTP {response.status_code}"
+                        last_status = response.status_code
+                        delay = _retry_after_seconds(response) or self._backoff(attempt)
+                        delay = min(delay, self._backoff_max)
+                    else:
+                        body, too_large = await _read_capped(response, max_bytes)
+                        return Fetched(
+                            url=str(response.url),
+                            status=response.status_code,
+                            content=body,
+                            content_type=response.headers.get("Content-Type"),
+                            fetched_at=fetched_at,
+                            elapsed_ms=int((time.monotonic() - started) * 1000),
+                            too_large=too_large,
+                        )
             except httpx.TransportError as exc:
                 last_error, last_status = f"{type(exc).__name__}: {exc}", None
                 delay = self._backoff(attempt)
-            else:
-                elapsed_ms = int((time.monotonic() - started) * 1000)
-                if response.status_code not in _RETRY_STATUSES:
-                    return Fetched(
-                        url=str(response.url),
-                        status=response.status_code,
-                        content=response.content,
-                        content_type=response.headers.get("Content-Type"),
-                        fetched_at=fetched_at,
-                        elapsed_ms=elapsed_ms,
-                    )
-                last_error, last_status = f"HTTP {response.status_code}", response.status_code
-                delay = _retry_after_seconds(response) or self._backoff(attempt)
-                delay = min(delay, self._backoff_max)
             if attempt < self._max_retries:
                 log.warning(
                     "retrying %s",

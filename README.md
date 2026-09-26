@@ -7,13 +7,20 @@ foundation every later milestone builds on. It records, point-in-time:
 | Data | Source | Schedule | Why it matters |
 |---|---|---|---|
 | Corporate announcements | BSE (primary), NSE | every 30 s (BSE), 120 s (NSE); slower at night | the event stream the strategy trades on |
-| Filing attachments (PDFs) | BSE / NSE | every 60 s, 20 per batch | the full text the LLM will read |
+| Filing attachments (PDFs) | BSE / NSE | every 60 s, 20 per batch; material categories only, ≤ 5 MB | the full text the LLM will read |
 | End-of-day prices + delivery % | NSE `sec_bhavdata_full` | after 18:00 IST, with 10-day catch-up | returns for event studies |
 | Price bands (circuit limits) | NSE `sec_list.csv` | daily after 08:00 IST | can we even trade it? |
 | Instrument list (symbol ↔ ISIN) | NSE `EQUITY_L.csv` | daily after 08:00 IST | entity resolution across exchanges |
 
 Price bands and the instrument list exist only as "today's file", so their
 history starts the day you start recording. **Start the recorder early.**
+
+**Attachment storage policy.** Downloading every filing PDF costs gigabytes a
+day (annual reports, investor presentations). By default only material
+categories (orders, results, ratings, M&A, fund raising, ...) are downloaded,
+up to 5 MB each; noise such as trading-window notices is skipped. The URL of
+*every* attachment is stored regardless, so anything skipped can be fetched
+later. Tune with `GATS_ATTACHMENTS_*` in `.env`.
 
 ---
 

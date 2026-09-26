@@ -315,6 +315,9 @@ def pending_attachments(conn: Connection, limit: int, max_attempts: int) -> list
                 announcements.c.source,
                 announcements.c.attachment_url,
                 announcements.c.attachment_attempts,
+                announcements.c.category,
+                announcements.c.subcategory,
+                announcements.c.subject,
             )
             .where(
                 announcements.c.attachment_status.in_(("pending", "failed")),
@@ -327,17 +330,19 @@ def pending_attachments(conn: Connection, limit: int, max_attempts: int) -> list
 
 
 def mark_attachment(
-    conn: Connection, ann_id: int, *, status: str, doc_id: str | None = None
+    conn: Connection,
+    ann_id: int,
+    *,
+    status: str,
+    doc_id: str | None = None,
+    attempted: bool = True,
 ) -> None:
-    conn.execute(
-        update(announcements)
-        .where(announcements.c.id == ann_id)
-        .values(
-            attachment_status=status,
-            attachment_doc_id=doc_id,
-            attachment_attempts=announcements.c.attachment_attempts + 1,
-        )
-    )
+    """Set the attachment status. ``attempted=False`` for policy decisions
+    (skipped) that made no download attempt."""
+    values: dict[str, Any] = {"attachment_status": status, "attachment_doc_id": doc_id}
+    if attempted:
+        values["attachment_attempts"] = announcements.c.attachment_attempts + 1
+    conn.execute(update(announcements).where(announcements.c.id == ann_id).values(**values))
 
 
 # --- daily files ----------------------------------------------------------------

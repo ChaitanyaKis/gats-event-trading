@@ -1,10 +1,8 @@
 """BSE corporate announcements.
 
-ENDPOINT AND FIELD NAMES ARE UNVERIFIED: they are based on the JSON API that
-powers bseindia.com's announcements page, which the build environment could
-not reach. Run ``gats probe bse`` first; it saves the raw payload and reports
-unknown/missing fields so this mapping can be corrected. Because raw payloads
-are always stored, ``gats reparse`` can then rebuild the tables.
+Endpoint and field mapping verified against the live API on 2026-09-26:
+50 rows per page, newest first. The API serves ONE DAY per query; a
+multi-day range returns ``{}``. ``gats probe bse`` re-checks the mapping.
 """
 
 from __future__ import annotations
@@ -43,6 +41,7 @@ KNOWN_FIELDS = frozenset(
 
 
 def request_params(start: date, end: date, page: int) -> dict[str, str]:
+    """Query parameters. Pass ``start == end``: BSE rejects ranges with ``{}``."""
     return {
         "pageno": str(page),
         "strCat": "-1",
@@ -81,6 +80,10 @@ def _rows(payload: bytes) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         data = json.loads(payload)
     except json.JSONDecodeError as exc:
         raise PayloadError(f"BSE payload is not JSON: {exc}") from exc
+    if data == {}:
+        # Verified 2026-09-26: BSE answers `{}` to queries it will not serve,
+        # e.g. multi-day ranges, which is why callers query one day at a time.
+        return [], {"empty_object": True}
     if not isinstance(data, dict) or not isinstance(data.get("Table"), list):
         raise PayloadError("BSE payload missing 'Table' list")
     meta: dict[str, Any] = {}
@@ -93,6 +96,8 @@ def _rows(payload: bytes) -> tuple[list[dict[str, Any]], dict[str, Any]]:
 def parse_announcements(payload: bytes, *, attachment_base: str) -> ParseResult[AnnouncementRecord]:
     rows, meta = _rows(payload)
     result: ParseResult[AnnouncementRecord] = ParseResult(records=[], meta=meta)
+    if meta.get("empty_object"):
+        result.warnings.append("BSE returned {} (no data served for this query)")
     if rows:
         result.meta["total_pages"] = to_int(pick(rows[0], "TotalPageCnt"))
     unknown: set[str] = set()

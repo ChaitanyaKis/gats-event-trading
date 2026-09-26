@@ -368,3 +368,88 @@ class TestNseSubset:
 
         stats = ingest.reparse_kind(svc, "nse_ann")
         assert stats == {"documents": 2, "updated": 2, "inserted": 0, "errors": 0}
+
+
+class TestSingleDayQueries:
+    @respx.mock
+    async def test_bse_job_never_sends_a_range(self, svc: Services, clock: FakeClock) -> None:
+        route = respx.get(BSE_URL).mock(
+            return_value=httpx.Response(200, content=bse_payload([bse_row("d1", stamp(1))]))
+        )
+        job = BseAnnouncementsJob("bse", 30, 2.0, time(0), time(7))
+        await job.run_once(svc)  # 11:30 IST -> today only
+        clock.now = datetime(2026, 9, 25, 19, 0, tzinfo=UTC)  # 00:30 IST on the 26th
+        await job.run_once(svc)
+        sent = [
+            (c.request.url.params["strPrevDate"], c.request.url.params["strToDate"])
+            for c in route.calls
+        ]
+        assert sent == [
+            ("20260925", "20260925"),
+            ("20260925", "20260925"),
+            ("20260926", "20260926"),
+        ]
+
+    @respx.mock
+    async def test_bse_empty_object_is_not_a_failure(self, svc: Services) -> None:
+        respx.get(BSE_URL).mock(return_value=httpx.Response(200, content=b"{}"))
+        job = BseAnnouncementsJob("bse", 30, 2.0, time(0), time(7))
+        outcome = await job.run_once(svc)
+        assert outcome.ok and outcome.n_records == 0
+
+
+class TestAttachmentPolicy:
+    def test_wanted(self) -> None:
+        inc, exc = ["order", "result"], ["trading window", "voting result"]
+        assert ingest.attachment_wanted(("Company Update", "Receipt of Order", None), inc, exc)
+        assert not ingest.attachment_wanted(("Trading Window", None, "Trading Window"), inc, exc)
+        assert not ingest.attachment_wanted(("AGM/EGM", "Voting Results", None), inc, exc)
+        assert not ingest.attachment_wanted(("Change in Director", None, None), inc, exc)
+        assert ingest.attachment_wanted(("Anything", None, None), [], exc)
+
+    @respx.mock
+    async def test_skips_by_policy_and_caps_size(self, svc: Services) -> None:
+        rows = [
+            bse_row("big", stamp(3)),
+            bse_row(
+                "noise",
+                stamp(2),
+                SUBCATNAME="Trading Window",
+                NEWSSUB="Trading Window",
+                CATEGORYNAME="Insider Trading / SAST",
+            ),
+            bse_row("small", stamp(1)),
+        ]
+        respx.get(BSE_URL).mock(return_value=httpx.Response(200, content=bse_payload(rows)))
+        await ingest.collect_bse(
+            svc,
+            date(2026, 9, 25),
+            date(2026, 9, 25),
+            job="t",
+            mode="live",
+            max_pages=1,
+            stop_when_no_new=True,
+        )
+        svc.settings.attachments_max_mb = 0.001  # ~1 KB
+        big = respx.get(LIVE + "big.pdf").mock(
+            return_value=httpx.Response(200, content=b"%PDF" + b"0" * 5000)
+        )
+        respx.get(LIVE + "small.pdf").mock(return_value=httpx.Response(200, content=b"%PDF-1"))
+        noise = respx.get(LIVE + "noise.pdf").mock(return_value=httpx.Response(200))
+
+        outcome = await ingest.fetch_pending_attachments(svc, job="att")
+        with svc.engine.begin() as conn:
+            status = dict(
+                conn.execute(
+                    select(announcements.c.source_ann_id, announcements.c.attachment_status)
+                ).all()
+            )
+            attempts = dict(
+                conn.execute(
+                    select(announcements.c.source_ann_id, announcements.c.attachment_attempts)
+                ).all()
+            )
+        assert status == {"big": "too_large", "noise": "skipped", "small": "done"}
+        assert noise.call_count == 0 and big.call_count == 1
+        assert attempts["noise"] == 0
+        assert outcome.meta["skipped"] == 1

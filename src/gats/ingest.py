@@ -4,7 +4,7 @@ probe and reparse commands so every path writes data the same way."""
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from typing import Any
@@ -544,14 +544,44 @@ def snapshot_table_for(what: str) -> Any:
 # --- attachments -----------------------------------------------------------------
 
 
+def attachment_wanted(
+    texts: Sequence[str | None], include: Sequence[str], exclude: Sequence[str]
+) -> bool:
+    """Storage policy: exclude wins; an empty include list means everything."""
+    haystack = " | ".join(t.lower() for t in texts if t)
+    if any(word.lower() in haystack for word in exclude):
+        return False
+    return not include or any(word.lower() in haystack for word in include)
+
+
 async def fetch_pending_attachments(svc: Services, *, job: str) -> Outcome:
+    """Download queued attachments that pass the storage policy.
+
+    Policy skips cost no requests, so a wider slice of the queue is scanned
+    than the download budget (``attachments_batch``) allows.
+    """
     settings = svc.settings
+    max_bytes = int(settings.attachments_max_mb * 1024 * 1024)
     with svc.engine.begin() as conn:
         rows = repo.pending_attachments(
-            conn, settings.attachments_batch, settings.attachments_max_attempts
+            conn, settings.attachments_batch * 10, settings.attachments_max_attempts
         )
     total = Outcome(ok=True)
+    downloads = 0
     for row in rows:
+        if not attachment_wanted(
+            (row.category, row.subcategory, row.subject),
+            settings.attachments_include,
+            settings.attachments_exclude,
+        ):
+            with svc.engine.begin() as conn:
+                repo.mark_attachment(conn, row.id, status="skipped", attempted=False)
+            total.meta["skipped"] = total.meta.get("skipped", 0) + 1
+            continue
+        if downloads >= settings.attachments_batch:
+            continue
+        downloads += 1
+
         if row.source == bse.SOURCE:
             candidates = bse.attachment_candidates(
                 row.attachment_url,
@@ -564,12 +594,15 @@ async def fetch_pending_attachments(svc: Services, *, job: str) -> Outcome:
 
         status, doc_id, error = "missing", None, None
         for url in candidates:
-            got = await _safe_get(svc, url, warmup_url=warmup)
+            got = await _safe_get(svc, url, warmup_url=warmup, max_bytes=max_bytes)
             if isinstance(got, Outcome):
                 status, error = "failed", got.error
                 continue
             if got.status == 404:
                 continue
+            if got.too_large:
+                status = "too_large"
+                break
             if not got.ok:
                 status, error = "failed", f"HTTP {got.status}"
                 continue

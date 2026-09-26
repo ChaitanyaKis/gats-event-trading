@@ -70,10 +70,13 @@ class _PollingAnnouncementsJob:
         return outcome
 
     @staticmethod
-    def _window(now: datetime) -> tuple[date, date]:
-        # Always include yesterday so nothing is lost across IST midnight.
+    def _days(now: datetime) -> list[date]:
+        """Today, plus yesterday during the first hour after IST midnight so
+        filings published just before midnight are not missed."""
         today = ist_today(now)
-        return today - timedelta(days=1), today
+        if ist_time_of_day(now) < time(1, 0):
+            return [today - timedelta(days=1), today]
+        return [today]
 
 
 @dataclass
@@ -81,29 +84,32 @@ class BseAnnouncementsJob(_PollingAnnouncementsJob):
     max_pages: int = 10
 
     async def run_once(self, svc: Services) -> Outcome:
-        start, end = self._window(svc.clock())
-        outcome = await ingest.collect_bse(
-            svc,
-            start,
-            end,
-            job=self.name,
-            mode=self._mode(),
-            max_pages=self.max_pages,
-            stop_when_no_new=True,
-        )
-        return self._mark(outcome)
+        total = Outcome(ok=True)
+        for day in self._days(svc.clock()):  # BSE serves one day per query
+            total.merge(
+                await ingest.collect_bse(
+                    svc,
+                    day,
+                    day,
+                    job=self.name,
+                    mode=self._mode(),
+                    max_pages=self.max_pages,
+                    stop_when_no_new=True,
+                )
+            )
+        return self._mark(total)
 
 
 @dataclass
 class NseAnnouncementsJob(_PollingAnnouncementsJob):
     async def run_once(self, svc: Services) -> Outcome:
-        today = ist_today(svc.clock())
-        # NSE returns the whole range in one response, so poll only today to
-        # keep payloads small; the midnight overlap is covered by the first
-        # poll after midnight including yesterday.
-        start = today - timedelta(days=1) if ist_time_of_day(svc.clock()) < time(1, 0) else today
-        outcome = await ingest.collect_nse(svc, start, today, job=self.name, mode=self._mode())
-        return self._mark(outcome)
+        # NSE returns a whole day per response, so poll only today (plus
+        # yesterday in the first hour after midnight) to keep payloads small.
+        # One day per request, like BSE: only single-day queries are verified.
+        total = Outcome(ok=True)
+        for day in self._days(svc.clock()):
+            total.merge(await ingest.collect_nse(svc, day, day, job=self.name, mode=self._mode()))
+        return self._mark(total)
 
 
 @dataclass

@@ -68,6 +68,62 @@ class Settings(BaseSettings):
     attachments_poll_s: float = Field(default=60.0, gt=0)
     attachments_batch: int = Field(default=20, ge=1)
     attachments_max_attempts: int = Field(default=5, ge=1)
+    # Storage policy, not a research filter: every attachment URL is kept, so
+    # anything skipped can be fetched later. Downloading every PDF costs
+    # gigabytes per day (annual reports, presentations).
+    attachments_max_mb: float = Field(default=5.0, gt=0)
+    # Case-insensitive substrings of category/subcategory/subject. Env vars
+    # take JSON arrays, e.g. GATS_ATTACHMENTS_INCLUDE='["order","result"]'.
+    # An empty include list means "everything not excluded".
+    attachments_include: list[str] = Field(
+        default_factory=lambda: [
+            "order",
+            "contract",
+            "result",
+            "outcome of board meeting",
+            "rating",
+            "acquisition",
+            "merger",
+            "amalgamation",
+            "scheme of arrangement",
+            "buy back",
+            "buyback",
+            "bonus",
+            "split",
+            "dividend",
+            "fund raising",
+            "preferential",
+            "qualified institution",
+            "rights issue",
+            "pledge",
+            "press release",
+            "joint venture",
+            "agreement",
+            "capacity",
+            "commercial production",
+            "commercial operation",
+            "insolvency",
+            "default",
+            "fraud",
+            "penalty",
+            "litigation",
+            "guidance",
+        ]
+    )
+    attachments_exclude: list[str] = Field(
+        default_factory=lambda: [
+            "trading window",
+            "newspaper",
+            "postal ballot",
+            "scrutinizer",
+            "voting result",
+            "74(5)",
+            "share certificate",
+            "duplicate",
+            "investor complaint",
+            "compliance certificate",
+        ]
+    )
 
     eod_enabled: bool = True
     eod_check_s: float = Field(default=1800.0, gt=0)

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
+
 import httpx
 import pytest
 import respx
@@ -97,3 +99,25 @@ async def test_per_host_throttle(sleeper: SleepRecorder) -> None:
         await c.get(URL)
     assert len(sleeper.calls) == 1
     assert 4.5 < sleeper.calls[0] <= 5.0
+
+
+@respx.mock
+async def test_max_bytes_uses_declared_length(sleeper: SleepRecorder) -> None:
+    respx.get(URL).mock(return_value=httpx.Response(200, content=b"x" * 2000))
+    async with client(sleeper) as c:
+        got = await c.get(URL, max_bytes=1000)
+        small = await c.get(URL, max_bytes=5000)
+    assert got.too_large and got.content == b"" and not got.ok
+    assert small.ok and len(small.content) == 2000
+
+
+@respx.mock
+async def test_max_bytes_stops_streaming_without_length(sleeper: SleepRecorder) -> None:
+    async def chunks() -> AsyncIterator[bytes]:
+        for _ in range(10):
+            yield b"y" * 500
+
+    respx.get(URL).mock(return_value=httpx.Response(200, content=chunks()))
+    async with client(sleeper) as c:
+        got = await c.get(URL, max_bytes=1200)
+    assert got.too_large

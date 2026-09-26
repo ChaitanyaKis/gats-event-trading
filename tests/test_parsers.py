@@ -137,3 +137,10 @@ class TestNseArchives:
     def test_utf8_bom_is_handled(self) -> None:
         result = nse_archives.parse_bands(b"\xef\xbb\xbf" + BANDS_CSV)
         assert len(result.records) == 2
+
+
+def test_bse_empty_object_means_no_data() -> None:
+    result = bse.parse_announcements(b"{}", attachment_base=LIVE)
+    assert result.records == []
+    assert result.meta["empty_object"] is True
+    assert "returned {}" in result.warnings[0]

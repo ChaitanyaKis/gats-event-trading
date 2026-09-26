@@ -94,8 +94,13 @@ class Handler(BaseHTTPRequestHandler):
         url = urlsplit(self.path)
         port = self.server.server_address[1]
         if url.path == "/bse/api":
+            query = parse_qs(url.query)
+            if query.get("strPrevDate") != query.get("strToDate"):
+                # Like the real API: ranges are refused with an empty object.
+                self._send(200, b"{}", "application/json")
+                return
             _bse_rows.insert(0, _new_bse_row(port))
-            page = int(parse_qs(url.query).get("pageno", ["1"])[0])
+            page = int(query.get("pageno", ["1"])[0])
             rows = _bse_rows[(page - 1) * 50 : page * 50]
             pages = max(1, (len(_bse_rows) + 49) // 50)
             for row in rows:
