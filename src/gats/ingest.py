@@ -156,16 +156,20 @@ def _ingest_announcement_payload(
         # Live polls mostly return rows we already have; store raw only when
         # something is new. Backfill pages are always kept as coverage evidence.
         if fresh or mode == "backfill":
+            content, raw_meta = fetched.content, {**request_meta, "mode": mode}
+            if src.source == nse.SOURCE and mode != "backfill":
+                content = nse.subset_payload(content, {r.source_ann_id for r in fresh})
+                raw_meta.update(subset=True, full_size_bytes=len(fetched.content))
             doc_id = repo.save_raw(
                 conn,
                 svc.store,
-                fetched.content,
+                content,
                 kind=src.kind,
                 source=src.source,
                 url=fetched.url,
                 content_type=fetched.content_type,
                 fetched_at=fetched.fetched_at,
-                meta={**request_meta, "mode": mode},
+                meta=raw_meta,
             )
             inserted = repo.insert_announcements(
                 conn,
@@ -188,8 +192,9 @@ def _ingest_announcement_payload(
             n_records=len(parsed.records),
             n_new=len(inserted),
         )
-    for warning in parsed.warnings:
-        log.warning("parser %s", kv(job=job, warning=warning))
+    if inserted:  # a re-polled page repeats old warnings; report them once
+        for warning in parsed.warnings:
+            log.warning("parser %s", kv(job=job, warning=warning))
     meta = {**parsed.meta, "descending": _is_descending(parsed.records)}
     return Outcome(
         ok=True,
@@ -470,7 +475,8 @@ async def ingest_snapshot(svc: Services, what: str, *, job: str) -> Outcome:
             )
         return Outcome(ok=False, http_status=got.status, error=f"HTTP {got.status}")
 
-    as_of = ist_today(got.fetched_at)
+    # Same clock the scheduler uses to decide "already have today".
+    as_of = ist_today(svc.clock())
     meta = {
         "as_of_date": as_of.isoformat(),
         "mode": "live",

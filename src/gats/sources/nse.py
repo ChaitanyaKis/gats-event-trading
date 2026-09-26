@@ -72,6 +72,24 @@ def _fallback_id(row: dict[str, Any]) -> str:
     return "h:" + hashlib.sha1(key.encode("utf-8")).hexdigest()[:20]
 
 
+def row_id(row: dict[str, Any]) -> tuple[str, bool]:
+    """``(announcement id, is_fallback)`` for one raw row."""
+    ann_id = clean_str(pick(row, "seq_id"))
+    return (ann_id, False) if ann_id else (_fallback_id(row), True)
+
+
+def subset_payload(payload: bytes, keep_ids: set[str]) -> bytes:
+    """The original rows whose id is in ``keep_ids``, as a JSON list.
+
+    NSE returns the whole day on every poll. Storing the full payload each
+    time something new appears would keep thousands of duplicate rows a day,
+    so live ingestion stores only the new rows, unmodified. The subset parses
+    exactly like the full payload.
+    """
+    rows = [row for row in _rows(payload) if row_id(row)[0] in keep_ids]
+    return json.dumps(rows, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+
+
 def parse_announcements(payload: bytes) -> ParseResult[AnnouncementRecord]:
     rows = _rows(payload)
     result: ParseResult[AnnouncementRecord] = ParseResult(records=[])
@@ -79,9 +97,8 @@ def parse_announcements(payload: bytes) -> ParseResult[AnnouncementRecord]:
 
     for index, row in enumerate(rows):
         unknown.update(k.lower() for k in row if k.lower() not in KNOWN_FIELDS)
-        ann_id = clean_str(pick(row, "seq_id"))
-        if not ann_id:
-            ann_id = _fallback_id(row)
+        ann_id, is_fallback = row_id(row)
+        if is_fallback:
             result.warnings.append(f"row {index}: missing seq_id, using content hash {ann_id}")
 
         disseminated = parse_ist_datetime(pick(row, "exchdisstime"))

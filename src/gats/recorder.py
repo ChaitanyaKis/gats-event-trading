@@ -236,7 +236,12 @@ class Heartbeat:
 
     def update(self, job: str, **fields: Any) -> None:
         self._state.setdefault(job, {}).update(fields)
-        self._write()
+        try:
+            self._write()
+        except OSError as exc:
+            # On Windows the replace fails if a reader holds the file open.
+            # A missed heartbeat must never stop a job; the next update retries.
+            log.warning("heartbeat write failed %s", kv(error=str(exc)))
 
     def _write(self) -> None:
         self._path.parent.mkdir(parents=True, exist_ok=True)

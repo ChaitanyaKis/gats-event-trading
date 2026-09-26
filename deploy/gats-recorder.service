@@ -1,0 +1,34 @@
+# systemd unit for the GATS recorder on a Linux VM.
+#
+# Install:
+#   sudo useradd --system --create-home --home-dir /opt/gats gats
+#   sudo -u gats git clone <your repo> /opt/gats/app   (or copy the files)
+#   cd /opt/gats/app && sudo -u gats python3 -m venv .venv
+#   sudo -u gats .venv/bin/pip install -e .
+#   sudo -u gats .venv/bin/gats init && sudo -u gats .venv/bin/gats probe bse
+#   sudo cp deploy/gats-recorder.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now gats-recorder
+#   journalctl -u gats-recorder -f        # logs
+#   sudo -u gats /opt/gats/app/.venv/bin/gats status
+
+[Unit]
+Description=GATS data recorder
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=gats
+WorkingDirectory=/opt/gats/app
+ExecStart=/opt/gats/app/.venv/bin/gats record
+Restart=always
+RestartSec=30
+TimeoutStopSec=30
+# Hardening: the recorder only needs its own directory.
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/opt/gats/app/data
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
