@@ -11,3 +11,4 @@ dist/
 # Local data and secrets never go into git
 data/
 .env
+.claude/settings.local.json

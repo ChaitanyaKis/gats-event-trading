@@ -167,9 +167,17 @@ scripts/           mock exchange, smoke settings, Windows runner
 deploy/            systemd unit
 ```
 
+## Building with Claude Code
+
+The rest of the project (M2 → M8) is built by Claude Code following
+`CLAUDE.md`, `docs/ROADMAP.md` and `docs/PROGRESS.md`. Setup and the
+one-time prompt are in [`docs/KICKOFF.md`](docs/KICKOFF.md). After that,
+type `/gats` in each session.
+
 ## Roadmap
 
-M1 recorder (this) → M2 historical backfill + entity resolution →
-M3 daily event study (the cheap test of whether the edge exists) →
-M4 LLM extraction → M5 minute data + reaction curves → M6 backtester →
-M7 paper trading → M8 live pilot. See the GATS project docs for the full design.
+M1 recorder (done) → M2 reference data + entity resolution → M3 daily event
+study (the cheap test of whether an edge exists) → M4 LLM extraction →
+M5 minute data + reaction curves → M6 backtester → M7 paper trading →
+M8 live pilot (human-activated only). Details: [`docs/ROADMAP.md`](docs/ROADMAP.md);
+rationale: [`docs/DESIGN.md`](docs/DESIGN.md).
