@@ -82,8 +82,11 @@ class _PollingAnnouncementsJob:
 @dataclass
 class BseAnnouncementsJob(_PollingAnnouncementsJob):
     max_pages: int = 10
+    catchup_max_pages: int = 100
 
     async def run_once(self, svc: Services) -> Outcome:
+        # After a restart, today may already have 20+ pages of filings.
+        pages = self.max_pages if self._caught_up else self.catchup_max_pages
         total = Outcome(ok=True)
         for day in self._days(svc.clock()):  # BSE serves one day per query
             total.merge(
@@ -93,7 +96,7 @@ class BseAnnouncementsJob(_PollingAnnouncementsJob):
                     day,
                     job=self.name,
                     mode=self._mode(),
-                    max_pages=self.max_pages,
+                    max_pages=pages,
                     stop_when_no_new=True,
                 )
             )
@@ -185,6 +188,54 @@ class AttachmentsJob:
         return await ingest.fetch_pending_attachments(svc, job=self.name)
 
 
+@dataclass
+class ReconcileJob:
+    """Re-collect each of the last ``days`` days in full until it is complete.
+
+    Heals every kind of gap without manual work: the PC being off, BSE
+    throttling mid-day, or more new filings between two polls than one page
+    holds. Rows it adds are labelled ``backfill`` (they were not seen live).
+    Its outcome is always ok: per-day failures live in ``backfill_days`` and
+    must not shorten the hourly interval through the error backoff.
+    """
+
+    name: str
+    check_s: float
+    days: int
+    sources: tuple[str, ...]
+    max_pages: int
+
+    def interval_s(self, now: datetime) -> float:
+        return self.check_s
+
+    def due(self, svc: Services) -> list[tuple[str, date]]:
+        today = ist_today(svc.clock())
+        due: list[tuple[str, date]] = []
+        with svc.engine.begin() as conn:
+            for back in range(self.days, 0, -1):
+                day = today - timedelta(days=back)
+                for source in self.sources:
+                    if repo.backfill_day_status(conn, source, day) not in ("complete", "gave_up"):
+                        due.append((source, day))
+        return due
+
+    async def run_once(self, svc: Services) -> Outcome:
+        total = Outcome(ok=True)
+        for source, day in self.due(svc):
+            outcome = await ingest.backfill_day(
+                svc, source, day, job=self.name, max_pages=self.max_pages
+            )
+            total.n_records += outcome.n_records
+            total.n_new += outcome.n_new
+            if outcome.meta.get("backfill_status") != "complete":
+                total.warnings.append(f"{source} {day}: {outcome.error or 'incomplete'}")
+                log.warning(
+                    "reconcile incomplete %s",
+                    kv(source=source, day=str(day), error=outcome.error or "incomplete"),
+                )
+        return total
+
+
 def build_jobs(svc: Services) -> list[Job]:
     s = svc.settings
     jobs: list[Job] = []
@@ -197,6 +248,7 @@ def build_jobs(svc: Services) -> list[Job]:
                 s.night_start_ist,
                 s.night_end_ist,
                 max_pages=s.bse_max_pages,
+                catchup_max_pages=s.bse_catchup_max_pages,
             )
         )
     if s.nse_enabled:
@@ -230,6 +282,15 @@ def build_jobs(svc: Services) -> list[Job]:
         )
     if s.attachments_enabled:
         jobs.append(AttachmentsJob("attachments", s.attachments_poll_s))
+    sources = tuple(
+        src for src, enabled in (("BSE", s.bse_enabled), ("NSE", s.nse_enabled)) if enabled
+    )
+    if s.reconcile_enabled and sources:
+        jobs.append(
+            ReconcileJob(
+                "reconcile", s.reconcile_check_s, s.reconcile_days, sources, s.backfill_max_pages
+            )
+        )
     return jobs
 
 

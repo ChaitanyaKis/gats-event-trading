@@ -14,7 +14,7 @@ import json
 from datetime import date
 from typing import Any
 
-from gats.sources._util import clean_str, looks_like_html, pick
+from gats.sources._util import clean_str, looks_like_html, pick, preview
 from gats.sources.models import AnnouncementRecord, ParseResult, PayloadError
 from gats.timeutil import parse_ist_datetime
 
@@ -53,15 +53,17 @@ def request_headers(referer: str) -> dict[str, str]:
 
 def _rows(payload: bytes) -> list[dict[str, Any]]:
     if looks_like_html(payload):
-        raise PayloadError("NSE returned HTML instead of JSON (blocked or cookies missing)")
+        raise PayloadError(f"NSE returned HTML instead of JSON (blocked?): {preview(payload)}")
     try:
         data = json.loads(payload)
     except json.JSONDecodeError as exc:
-        raise PayloadError(f"NSE payload is not JSON: {exc}") from exc
+        raise PayloadError(f"NSE payload is not JSON ({exc}): {preview(payload)}") from exc
     if isinstance(data, dict) and isinstance(data.get("data"), list):
         data = data["data"]
     if not isinstance(data, list):
-        raise PayloadError("NSE payload is neither a list nor {'data': [...]}")
+        raise PayloadError(
+            f"NSE payload is neither a list nor {{'data': [...]}}: {preview(payload)}"
+        )
     return [row for row in data if isinstance(row, dict)]
 
 

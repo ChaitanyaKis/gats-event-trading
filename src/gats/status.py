@@ -11,6 +11,7 @@ from typing import Any
 
 from sqlalchemy import Connection, func, select
 
+from gats.db import repo
 from gats.db.schema import (
     announcements,
     eod_prices,
@@ -29,6 +30,7 @@ class StatusReport:
     eod_latest: str | None = None
     bands_latest: str | None = None
     instruments_latest: str | None = None
+    backfill_days: dict[str, int] = field(default_factory=dict)
     raw_docs: int = 0
     raw_bytes: int = 0
     last_fetch_by_job: dict[str, dict[str, Any]] = field(default_factory=dict)
@@ -75,6 +77,8 @@ def build_report(conn: Connection, now: datetime, heartbeat_path: Path) -> Statu
     report.bands_latest = str(bands_latest) if bands_latest else None
     inst_latest = conn.execute(select(func.max(instrument_snapshots.c.as_of_date))).scalar()
     report.instruments_latest = str(inst_latest) if inst_latest else None
+
+    report.backfill_days = repo.backfill_summary(conn)
 
     docs, size = conn.execute(
         select(func.count(), func.coalesce(func.sum(raw_documents.c.size_bytes), 0))

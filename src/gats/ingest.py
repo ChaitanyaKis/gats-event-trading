@@ -3,8 +3,9 @@ probe and reparse commands so every path writes data the same way."""
 
 from __future__ import annotations
 
+import asyncio
 import logging
-from collections.abc import Callable, Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from typing import Any
@@ -32,6 +33,7 @@ class Services:
     store: RawStore
     client: PoliteClient
     clock: Callable[[], datetime] = utcnow
+    sleep: Callable[[float], Awaitable[None]] = asyncio.sleep
 
 
 @dataclass
@@ -222,23 +224,29 @@ async def collect_bse(
     max_pages: int,
     stop_when_no_new: bool,
 ) -> Outcome:
-    """Page through BSE announcements for ``[start, end]``.
+    """Page through BSE announcements for ``[start, end]`` (pass one day).
 
-    Live mode stops at the first page with nothing new. If the API turns out
-    to sort oldest-first, new rows sit on the last pages, so paging reverses
-    from the end.
+    Live mode stops at the first page with nothing new; if the API sorts
+    oldest-first, paging runs from the end instead.
+
+    A page that should hold rows but comes back empty, as ``{}``, or as an
+    HTML block page is an anomaly (BSE throttling, seen 2026-09-28). Such pages
+    are retried after a pause. ``meta["complete"]`` is True only when every
+    page was fetched cleanly; backfill bookkeeping relies on it.
     """
     settings = svc.settings
     src = _bse_source(settings)
-    total = Outcome(ok=True)
+    total = Outcome(ok=True, meta={"complete": False})
+    warmup = settings.bse_referer if settings.bse_warmup else None
 
-    async def fetch_page(page: int) -> Outcome:
+    async def fetch_page_once(page: int) -> Outcome:
         params = bse.request_params(start, end, page)
         got = await _safe_get(
             svc,
             settings.bse_announcements_url,
             params=params,
             headers=bse.request_headers(settings.bse_referer),
+            warmup_url=warmup,
         )
         if isinstance(got, Outcome):
             _log_transport_failure(svc, job, settings.bse_announcements_url, got)
@@ -247,15 +255,50 @@ async def collect_bse(
             svc, src, got, job=job, mode=mode, request_meta={"params": params}
         )
 
-    first = await fetch_page(1)
+    async def fetch_page(page: int, *, expect_rows: bool) -> Outcome:
+        retry = mode == "backfill" or page > 1
+        attempts = settings.bse_page_retries + 1 if retry else 1
+        outcome = Outcome(ok=False, error="not attempted")
+        for attempt in range(attempts):
+            outcome = await fetch_page_once(page)
+            anomalous = (
+                outcome.ok
+                and outcome.n_records == 0
+                and (expect_rows or outcome.meta.get("empty_object"))
+            )
+            if outcome.ok and not anomalous:
+                return outcome
+            if anomalous:
+                outcome = Outcome(
+                    ok=False,
+                    http_status=outcome.http_status,
+                    error=f"BSE page {page} returned no rows (throttled?)",
+                    meta=outcome.meta,
+                )
+            if attempt + 1 < attempts:
+                delay = settings.bse_page_retry_delay_s * (attempt + 1)
+                log.warning(
+                    "bse page retry %s", kv(job=job, page=page, error=outcome.error, delay_s=delay)
+                )
+                await svc.sleep(delay)
+        return outcome
+
+    first = await fetch_page(1, expect_rows=False)
+    if first.meta.get("empty_object") and mode != "backfill":
+        # Live: `{}` for today is treated as "nothing yet", not as a failure,
+        # so an idle poll does not trip the job's error backoff.
+        first = Outcome(ok=True, meta=first.meta)
     total.merge(first)
-    if not first.ok or first.n_records == 0:
+    if not first.ok or first.meta.get("empty_object"):
         return total
-    total_pages = min(int(first.meta.get("total_pages") or 1), max_pages)
+    if first.n_records == 0:
+        total.meta["complete"] = True  # a real, empty Table
+        return total
+
+    reported_pages = int(first.meta.get("total_pages") or 1)
+    total_pages = min(reported_pages, max_pages)
     descending = bool(first.meta.get("descending", True))
-    total.meta["descending"] = descending
-    if total_pages <= 1:
-        return total
+    total.meta.update(descending=descending, total_pages=reported_pages)
     if stop_when_no_new and descending and first.n_new == 0:
         # Newest-first and nothing new on page 1 means nothing new anywhere.
         return total
@@ -265,12 +308,13 @@ async def collect_bse(
     else:
         pages = range(2, total_pages + 1)
     for page in pages:
-        outcome = await fetch_page(page)
+        outcome = await fetch_page(page, expect_rows=True)
         total.merge(outcome)
-        if not outcome.ok or outcome.n_records == 0:
-            break
+        if not outcome.ok:
+            return total
         if stop_when_no_new and outcome.n_new == 0:
-            break
+            return total
+    total.meta["complete"] = reported_pages <= max_pages
     return total
 
 
@@ -289,9 +333,49 @@ async def collect_nse(
     if isinstance(got, Outcome):
         _log_transport_failure(svc, job, settings.nse_announcements_url, got)
         return got
-    return _ingest_announcement_payload(
+    outcome = _ingest_announcement_payload(
         svc, _nse_source(), got, job=job, mode=mode, request_meta={"params": params}
     )
+    outcome.meta["complete"] = outcome.ok
+    return outcome
+
+
+async def backfill_day(
+    svc: Services, source: str, day: date, *, job: str, max_pages: int
+) -> Outcome:
+    """Load one full day of announcements and record whether it is complete.
+
+    Only a complete day is skipped by later runs; a partial day (throttled
+    mid-way, laptop shut down) is retried, and idempotent inserts make the
+    retry cheap and safe.
+    """
+    if source == bse.SOURCE:
+        outcome = await collect_bse(
+            svc, day, day, job=job, mode="backfill", max_pages=max_pages, stop_when_no_new=False
+        )
+    elif source == nse.SOURCE:
+        outcome = await collect_nse(svc, day, day, job=job, mode="backfill")
+    else:
+        raise ValueError(f"unknown source: {source}")
+    complete = bool(outcome.ok and outcome.meta.get("complete"))
+    if not outcome.ok and outcome.http_status is None:
+        # No answer from the server (network down, PC offline): not the day's
+        # fault, so it does not count towards giving up.
+        outcome.meta["backfill_status"] = "incomplete"
+        return outcome
+    with svc.engine.begin() as conn:
+        status = repo.record_backfill_day(
+            conn,
+            source,
+            day,
+            complete=complete,
+            n_records=outcome.n_records,
+            error=None if complete else (outcome.error or "incomplete"),
+            now=svc.clock(),
+            max_attempts=svc.settings.reconcile_max_attempts,
+        )
+    outcome.meta["backfill_status"] = status
+    return outcome
 
 
 def _log_transport_failure(svc: Services, job: str, url: str, outcome: Outcome) -> None:

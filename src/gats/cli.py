@@ -10,7 +10,7 @@ import sys
 from collections import Counter
 from collections.abc import AsyncIterator
 from dataclasses import asdict, fields
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 from enum import StrEnum
 from typing import Annotated, Any
 
@@ -21,16 +21,17 @@ from gats import __version__, ingest
 from gats.config import Settings
 from gats.db import repo
 from gats.db.engine import init_db, make_engine
-from gats.db.schema import announcements
+from gats.db.schema import fetch_log, raw_documents
 from gats.ingest import Outcome, Services
 from gats.logging_setup import configure_logging
 from gats.net import FetchError, PoliteClient
 from gats.rawstore import RawStore
 from gats.recorder import run_recorder
 from gats.sources import bse, nse, nse_archives
+from gats.sources._util import preview
 from gats.sources.models import PayloadError
 from gats.status import build_report
-from gats.timeutil import daterange, ist_datetime, ist_today, utcnow
+from gats.timeutil import daterange, ist_today, utcnow
 
 app = typer.Typer(
     add_completion=False, no_args_is_help=True, help="GATS data recorder and research tools."
@@ -75,6 +76,7 @@ async def _services(settings: Settings) -> AsyncIterator[Services]:
         user_agent=settings.user_agent,
         timeout_s=settings.http_timeout_s,
         min_interval_s=settings.min_request_interval_s,
+        host_min_interval_s=settings.host_min_interval_s,
         max_retries=settings.max_retries,
         backoff_base_s=settings.backoff_base_s,
         backoff_max_s=settings.backoff_max_s,
@@ -268,61 +270,38 @@ def probe(
 # --- backfill ------------------------------------------------------------------------
 
 
-def _day_already_backfilled(svc: Services, source: str, day: date) -> bool:
-    start, end = (
-        ist_datetime(day, datetime.min.time()),
-        ist_datetime(day + timedelta(days=1), datetime.min.time()),
-    )
-    with svc.engine.begin() as conn:
-        return (
-            conn.execute(
-                select(announcements.c.id)
-                .where(
-                    announcements.c.source == source,
-                    announcements.c.ingest_mode == "backfill",
-                    announcements.c.event_ts >= start,
-                    announcements.c.event_ts < end,
-                )
-                .limit(1)
-            ).first()
-            is not None
-        )
-
-
 @backfill_app.command("announcements")
 def backfill_announcements(
     source: Annotated[AnnSource, typer.Option(help="Exchange to backfill.")],
     start: Annotated[str, typer.Option(help="First day, YYYY-MM-DD.")],
     end: Annotated[str, typer.Option(help="Last day, YYYY-MM-DD.")],
-    skip_existing: Annotated[bool, typer.Option(help="Skip days already backfilled.")] = True,
-    max_pages: Annotated[int, typer.Option(help="BSE page cap per day.")] = 1000,
+    skip_complete: Annotated[
+        bool, typer.Option(help="Skip days already backfilled completely.")
+    ] = True,
+    max_pages: Annotated[int | None, typer.Option(help="BSE page cap per day.")] = None,
 ) -> None:
-    """Load historical announcements day by day (resumable, idempotent)."""
+    """Load historical announcements day by day (resumable, idempotent).
+
+    A day counts as done only when every page was fetched; partial days are
+    retried on the next run.
+    """
     settings = _settings()
     first, last = _parse_day(start), _parse_day(end)
+    src = bse.SOURCE if source is AnnSource.bse else nse.SOURCE
+    pages = max_pages or settings.backfill_max_pages
 
     async def main() -> None:
         async with _services(settings) as svc:
             for day in daterange(first, last):
-                src = bse.SOURCE if source is AnnSource.bse else nse.SOURCE
-                if skip_existing and _day_already_backfilled(svc, src, day):
-                    typer.echo(f"{day}: already backfilled, skipping")
-                    continue
-                if source is AnnSource.bse:
-                    outcome = await ingest.collect_bse(
-                        svc,
-                        day,
-                        day,
-                        job="backfill_bse",
-                        mode="backfill",
-                        max_pages=max_pages,
-                        stop_when_no_new=False,
-                    )
-                else:
-                    outcome = await ingest.collect_nse(
-                        svc, day, day, job="backfill_nse", mode="backfill"
-                    )
-                _print_outcome(str(day), outcome)
+                if skip_complete:
+                    with svc.engine.begin() as conn:
+                        if repo.backfill_day_status(conn, src, day) == "complete":
+                            typer.echo(f"{day}: complete, skipping")
+                            continue
+                outcome = await ingest.backfill_day(
+                    svc, src, day, job=f"backfill_{source.value}", max_pages=pages
+                )
+                _print_outcome(f"{day} [{outcome.meta.get('backfill_status')}]", outcome)
 
     try:
         asyncio.run(main())
@@ -376,6 +355,45 @@ def reparse(kind: Annotated[ReparseKind, typer.Argument(help="Raw payload kind."
     typer.echo(json.dumps(stats))
 
 
+@app.command("inspect-bad")
+def inspect_bad(
+    limit: Annotated[int, typer.Option(help="How many of each to show.")] = 5,
+) -> None:
+    """Show recent failed fetches and the payloads that failed to parse."""
+    settings = _settings(log_to_file=False)
+    engine = make_engine(settings.resolved_db_url)
+    init_db(engine)
+    store = RawStore(settings.raw_dir)
+    with engine.begin() as conn:
+        failures = conn.execute(
+            select(fetch_log)
+            .where(fetch_log.c.ok.is_(False))
+            .order_by(fetch_log.c.id.desc())
+            .limit(limit)
+        ).all()
+        bad_docs = conn.execute(
+            select(raw_documents)
+            .where(raw_documents.c.kind.like("bad_%"))
+            .order_by(raw_documents.c.first_fetched_at.desc())
+            .limit(limit)
+        ).all()
+    engine.dispose()
+
+    typer.echo(f"recent failed fetches ({len(failures)}):")
+    for row in failures:
+        typer.echo(
+            f"  {row.started_at:%Y-%m-%d %H:%M:%S}Z {row.job:18} http={row.http_status} {row.error}"
+        )
+        typer.echo(f"      {row.url}")
+    typer.echo(f"payloads that failed to parse ({len(bad_docs)}, identical payloads stored once):")
+    for doc in bad_docs:
+        body = store.get(doc.doc_id)
+        typer.echo(f"  {doc.first_fetched_at:%Y-%m-%d %H:%M:%S}Z {doc.kind} {len(body)} bytes")
+        typer.echo(f"      url:   {doc.url}")
+        typer.echo(f"      error: {(doc.meta or {}).get('error')}")
+        typer.echo(f"      body:  {preview(body, 300)}")
+
+
 @app.command()
 def status(as_json: Annotated[bool, typer.Option("--json")] = False) -> None:
     """Show what has been recorded and whether jobs are healthy."""
@@ -395,6 +413,7 @@ def status(as_json: Annotated[bool, typer.Option("--json")] = False) -> None:
     typer.echo(f"eod:           {report.eod_days} days, latest {report.eod_latest}")
     typer.echo(f"bands:         latest {report.bands_latest}")
     typer.echo(f"instruments:   latest {report.instruments_latest}")
+    typer.echo(f"backfill days: {report.backfill_days or 'none'}")
     typer.echo(f"raw store:     {report.raw_docs} docs, {report.raw_bytes / 1e6:.1f} MB")
     typer.echo("live latency (s, dissemination -> stored, last 24h):")
     for src, summary in report.live_latency_s.items():

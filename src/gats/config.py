@@ -34,6 +34,9 @@ class Settings(BaseSettings):
     user_agent: str = _DEFAULT_UA
     http_timeout_s: float = Field(default=20.0, gt=0)
     min_request_interval_s: float = Field(default=1.0, ge=0)
+    # Slower per-host overrides. BSE's API throttled bursts on 2026-09-28.
+    # Env var takes JSON: GATS_HOST_MIN_INTERVAL_S='{"api.bseindia.com": 3}'
+    host_min_interval_s: dict[str, float] = Field(default_factory=lambda: {"api.bseindia.com": 2.0})
     max_retries: int = Field(default=4, ge=0)
     backoff_base_s: float = Field(default=2.0, gt=0)
     backoff_max_s: float = Field(default=60.0, gt=0)
@@ -58,6 +61,12 @@ class Settings(BaseSettings):
     bse_enabled: bool = True
     bse_poll_s: float = Field(default=30.0, gt=0)
     bse_max_pages: int = Field(default=10, ge=1)
+    # First poll after a (re)start pages further back: a busy day has 20+ pages.
+    bse_catchup_max_pages: int = Field(default=100, ge=1)
+    # BSE intermittently answers {} or an HTML block page under load.
+    bse_page_retries: int = Field(default=2, ge=0)
+    bse_page_retry_delay_s: float = Field(default=15.0, ge=0)
+    bse_warmup: bool = True  # load the homepage once for session cookies
     nse_enabled: bool = True
     nse_poll_s: float = Field(default=120.0, gt=0)
     night_poll_multiplier: float = Field(default=2.0, ge=1)
@@ -134,6 +143,14 @@ class Settings(BaseSettings):
     snapshots_enabled: bool = True
     snapshot_check_s: float = Field(default=1800.0, gt=0)
     daily_snapshot_after_ist: time = time(8, 0)
+
+    # Reconcile: re-collect recent days in full so gaps (PC off, throttling,
+    # >1 page of filings between polls) heal automatically.
+    reconcile_enabled: bool = True
+    reconcile_check_s: float = Field(default=3600.0, gt=0)
+    reconcile_days: int = Field(default=7, ge=1)
+    reconcile_max_attempts: int = Field(default=3, ge=1)
+    backfill_max_pages: int = Field(default=1000, ge=1)
 
     job_error_backoff_max_s: float = Field(default=900.0, gt=0)
 

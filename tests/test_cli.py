@@ -52,3 +52,14 @@ def test_reparse_empty() -> None:
 def test_bad_date_is_rejected() -> None:
     result = runner.invoke(app, ["backfill", "eod", "--start", "25-09-2026", "--end", "2026-09-26"])
     assert result.exit_code != 0
+
+
+def test_inspect_bad_on_empty_database() -> None:
+    result = runner.invoke(app, ["inspect-bad"])
+    assert result.exit_code == 0, result.stdout
+    assert "recent failed fetches (0)" in result.stdout
+
+
+def test_status_shows_backfill_line() -> None:
+    result = runner.invoke(app, ["status"])
+    assert "backfill days: none" in result.stdout

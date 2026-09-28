@@ -74,6 +74,7 @@ def test_build_jobs_respects_flags(svc: Services) -> None:
         "nse_bands",
         "nse_instruments",
         "attachments",
+        "reconcile",
     }
     svc.settings.nse_enabled = False
     svc.settings.attachments_enabled = False

@@ -72,7 +72,7 @@ gats status                          # in a second terminal
 ### Try it offline first (no exchange access needed)
 
 ```powershell
-python scripts\mock_exchange.py      # terminal 1: fake exchange on port 8765
+python scripts\mock_exchange.py      # terminal 1: fake exchange (add --flaky 3 to simulate throttling)
 copy scripts\smoke.env .env          # terminal 2: point GATS at it
 gats record                          # watch data arrive; Ctrl+C to stop
 gats status
@@ -92,10 +92,20 @@ del .env                             # back to real endpoints
 | `gats backfill eod --start D --end D` | Load historical daily prices (resumable) |
 | `gats backfill announcements --source bse\|nse --start D --end D` | Load historical filings day by day (resumable) |
 | `gats reparse {bse_ann,nse_ann,nse_eod,nse_bands,nse_instruments}` | Re-run the current parser over stored raw payloads |
+| `gats inspect-bad [--limit N]` | Recent failed fetches and the payloads that failed to parse |
+| `gats version` | Installed version (check it after every update) |
 
-**Backfill pacing:** at the default 1 request/second, BSE takes roughly one
-request per 50 filings, so a year of history is several hours. Run it
-overnight, and rerun the same command to resume.
+**Backfill pacing:** BSE is limited to one request every 2 seconds
+(`GATS_HOST_MIN_INTERVAL_S`), and it returns 50 filings per request, so a
+year of history takes several hours. Run it overnight, and rerun the same
+command to resume. A day counts as done only when *every* page was fetched.
+BSE sometimes throttles with `{}` or an HTML block page; those pages are
+retried, and partial days are retried on the next run.
+
+**Gaps heal automatically.** The `reconcile` job re-collects each of the last
+7 days in full until it is complete, so a PC that was off, throttling, or a
+burst of filings between polls leaves no permanent hole. For gaps older than
+7 days, run `gats backfill announcements` for that range.
 
 ---
 
@@ -134,7 +144,7 @@ BSE terms and use the data for personal research.
 ## Development
 
 ```powershell
-pytest              # 78 tests, no network needed
+pytest              # 103 tests, no network needed
 ruff check src tests scripts
 mypy                # strict
 ```

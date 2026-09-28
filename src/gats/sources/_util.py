@@ -67,6 +67,12 @@ def read_csv(payload: bytes) -> tuple[list[str], list[dict[str, str]]]:
     return header, records
 
 
+def preview(payload: bytes, limit: int = 120) -> str:
+    """Short, log-safe view of a payload for error messages."""
+    text = payload[:limit].decode("utf-8", errors="replace")
+    return " ".join(text.split()) + ("..." if len(payload) > limit else "")
+
+
 def looks_like_html(payload: bytes) -> bool:
     head = payload[:512].lstrip().lower()
     return head.startswith(b"<!doctype html") or head.startswith(b"<html")

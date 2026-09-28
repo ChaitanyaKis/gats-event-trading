@@ -13,6 +13,11 @@ class SchemaVersionError(RuntimeError):
     pass
 
 
+# Older versions whose upgrade only adds tables. create_all() has already
+# added them, so upgrading is just recording the new version.
+_ADDITIVE_UPGRADES = frozenset({1})
+
+
 def make_engine(url: str) -> Engine:
     engine = create_engine(url, pool_pre_ping=True)
     if engine.dialect.name == "sqlite":
@@ -40,6 +45,12 @@ def init_db(engine: Engine) -> None:
         if current is None:
             conn.execute(
                 schema_meta.insert().values(key="schema_version", value=str(SCHEMA_VERSION))
+            )
+        elif int(current) in _ADDITIVE_UPGRADES and int(current) < SCHEMA_VERSION:
+            conn.execute(
+                schema_meta.update()
+                .where(schema_meta.c.key == "schema_version")
+                .values(value=str(SCHEMA_VERSION))
             )
         elif int(current) != SCHEMA_VERSION:
             raise SchemaVersionError(

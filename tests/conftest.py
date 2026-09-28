@@ -53,6 +53,9 @@ def settings(tmp_path: Path) -> Settings:
         max_retries=2,
         backoff_base_s=0.001,
         backoff_max_s=0.01,
+        bse_warmup=False,  # tested explicitly in test_ingest
+        bse_page_retry_delay_s=5.0,
+        host_min_interval_s={},
     )
     s.ensure_dirs()
     return s
@@ -93,7 +96,9 @@ async def svc(
         backoff_max_s=settings.backoff_max_s,
         sleep=sleeper,
     )
-    yield Services(settings=settings, engine=engine, store=store, client=client, clock=clock)
+    yield Services(
+        settings=settings, engine=engine, store=store, client=client, clock=clock, sleep=sleeper
+    )
     await client.aclose()
 
 

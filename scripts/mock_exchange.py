@@ -19,6 +19,8 @@ from urllib.parse import parse_qs, urlsplit
 
 IST = timezone(timedelta(hours=5, minutes=30))
 _counter = itertools.count(1)
+_bse_requests = itertools.count(1)
+FLAKY_EVERY = 0  # set by --flaky: every Nth BSE API call answers {} like a throttled API
 _bse_rows: list[dict[str, object]] = []
 _nse_rows: list[dict[str, object]] = []
 
@@ -93,8 +95,13 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         url = urlsplit(self.path)
         port = self.server.server_address[1]
-        if url.path == "/bse/api":
+        if url.path == "/":
+            self._send(200, b"<html>bse home</html>", "text/html")
+        elif url.path == "/bse/api":
             query = parse_qs(url.query)
+            if FLAKY_EVERY and next(_bse_requests) % FLAKY_EVERY == 0:
+                self._send(200, b"{}", "application/json")
+                return
             if query.get("strPrevDate") != query.get("strToDate"):
                 # Like the real API: ranges are refused with an empty object.
                 self._send(200, b"{}", "application/json")
@@ -138,7 +145,10 @@ class Handler(BaseHTTPRequestHandler):
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--port", type=int, default=8765)
+    parser.add_argument("--flaky", type=int, default=0, help="every Nth BSE call returns {}")
     args = parser.parse_args()
+    global FLAKY_EVERY
+    FLAKY_EVERY = args.flaky
     server = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
     print(f"mock exchange on http://127.0.0.1:{args.port}")
     with contextlib.suppress(KeyboardInterrupt):

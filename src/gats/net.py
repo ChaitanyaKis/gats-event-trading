@@ -59,17 +59,19 @@ class FetchError(RuntimeError):
 
 
 class _HostThrottle:
-    def __init__(self, min_interval_s: float) -> None:
+    def __init__(self, min_interval_s: float, per_host: Mapping[str, float] | None = None) -> None:
         self._min_interval = min_interval_s
+        self._per_host = dict(per_host or {})
         self._locks: dict[str, asyncio.Lock] = {}
         self._last: dict[str, float] = {}
 
     async def wait(self, host: str, sleep: Sleep) -> None:
         lock = self._locks.setdefault(host, asyncio.Lock())
+        interval = self._per_host.get(host, self._min_interval)
         async with lock:
             last = self._last.get(host)
             if last is not None:
-                remaining = self._min_interval - (time.monotonic() - last)
+                remaining = interval - (time.monotonic() - last)
                 if remaining > 0:
                     await sleep(remaining)
             self._last[host] = time.monotonic()
@@ -111,6 +113,7 @@ class PoliteClient:
         user_agent: str,
         timeout_s: float = 20.0,
         min_interval_s: float = 1.0,
+        host_min_interval_s: Mapping[str, float] | None = None,
         max_retries: int = 4,
         backoff_base_s: float = 2.0,
         backoff_max_s: float = 60.0,
@@ -127,7 +130,7 @@ class PoliteClient:
             follow_redirects=True,
             transport=transport,
         )
-        self._throttle = _HostThrottle(min_interval_s)
+        self._throttle = _HostThrottle(min_interval_s, host_min_interval_s)
         self._max_retries = max_retries
         self._backoff_base = backoff_base_s
         self._backoff_max = backoff_max_s

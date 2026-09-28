@@ -16,6 +16,7 @@ from sqlalchemy.dialects import postgresql, sqlite
 
 from gats.db.schema import (
     announcements,
+    backfill_days,
     eod_prices,
     fetch_log,
     instrument_snapshots,
@@ -456,3 +457,72 @@ def upsert_instruments(
 def has_rows_for_date(conn: Connection, table: Table, date_col: str, day: date) -> bool:
     column = table.c[date_col]
     return conn.execute(select(column).where(column == day).limit(1)).first() is not None
+
+
+# --- backfill bookkeeping -------------------------------------------------------
+
+
+def backfill_day_status(conn: Connection, source: str, day: date) -> str | None:
+    status: str | None = conn.execute(
+        select(backfill_days.c.status).where(
+            backfill_days.c.source == source, backfill_days.c.day == day
+        )
+    ).scalar_one_or_none()
+    return status
+
+
+def record_backfill_day(
+    conn: Connection,
+    source: str,
+    day: date,
+    *,
+    complete: bool,
+    n_records: int,
+    error: str | None,
+    now: datetime,
+    max_attempts: int,
+) -> str:
+    """Record one backfill attempt for ``(source, day)``; return the new status."""
+    attempts = (
+        conn.execute(
+            select(backfill_days.c.attempts).where(
+                backfill_days.c.source == source, backfill_days.c.day == day
+            )
+        ).scalar_one_or_none()
+        or 0
+    ) + 1
+    if complete:
+        status = "complete"
+    elif attempts >= max_attempts:
+        status = "gave_up"
+    else:
+        status = "incomplete"
+    upsert(
+        conn,
+        backfill_days,
+        [
+            {
+                "source": source,
+                "day": day,
+                "status": status,
+                "attempts": attempts,
+                "n_records": n_records,
+                "last_error": error[:2000] if error else None,
+                "updated_at": now,
+            }
+        ],
+        ["source", "day"],
+        ["status", "attempts", "n_records", "last_error", "updated_at"],
+    )
+    return status
+
+
+def backfill_summary(conn: Connection) -> dict[str, int]:
+    return {
+        f"{source}/{status}": int(count)
+        for source, status, count in conn.execute(
+            select(backfill_days.c.source, backfill_days.c.status, func.count()).group_by(
+                backfill_days.c.source, backfill_days.c.status
+            )
+        )
+    }

@@ -11,7 +11,7 @@ import json
 from datetime import date
 from typing import Any
 
-from gats.sources._util import clean_str, looks_like_html, pick, to_int
+from gats.sources._util import clean_str, looks_like_html, pick, preview, to_int
 from gats.sources.models import AnnouncementRecord, ParseResult, PayloadError
 from gats.timeutil import parse_ist_datetime
 
@@ -75,17 +75,17 @@ def attachment_candidates(url: str, live_base: str, hist_base: str) -> list[str]
 
 def _rows(payload: bytes) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     if looks_like_html(payload):
-        raise PayloadError("BSE returned HTML instead of JSON (blocked or endpoint changed)")
+        raise PayloadError(f"BSE returned HTML instead of JSON (blocked?): {preview(payload)}")
     try:
         data = json.loads(payload)
     except json.JSONDecodeError as exc:
-        raise PayloadError(f"BSE payload is not JSON: {exc}") from exc
+        raise PayloadError(f"BSE payload is not JSON ({exc}): {preview(payload)}") from exc
     if data == {}:
         # Verified 2026-09-26: BSE answers `{}` to queries it will not serve,
         # e.g. multi-day ranges, which is why callers query one day at a time.
         return [], {"empty_object": True}
     if not isinstance(data, dict) or not isinstance(data.get("Table"), list):
-        raise PayloadError("BSE payload missing 'Table' list")
+        raise PayloadError(f"BSE payload missing 'Table' list: {preview(payload)}")
     meta: dict[str, Any] = {}
     table1 = data.get("Table1")
     if isinstance(table1, list) and table1 and isinstance(table1[0], dict):

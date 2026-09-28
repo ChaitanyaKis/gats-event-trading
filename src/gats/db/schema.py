@@ -35,7 +35,7 @@ from sqlalchemy import (
 
 from gats.db.types import UTCDateTime
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 metadata = MetaData(
     naming_convention={
@@ -173,4 +173,19 @@ instrument_snapshots = Table(
     Column("raw_doc_id", String(64), ForeignKey("raw_documents.doc_id"), nullable=False),
     Column("parser_version", String(32), nullable=False),
     Index(None, "isin"),
+)
+
+# v2: per-day backfill bookkeeping. A day is skipped by later backfills only
+# once it is `complete`; `gave_up` stops automatic retries (manual backfill
+# still retries it).
+backfill_days = Table(
+    "backfill_days",
+    metadata,
+    Column("source", String(8), primary_key=True),
+    Column("day", Date, primary_key=True),
+    Column("status", String(16), nullable=False),  # complete | incomplete | gave_up
+    Column("attempts", Integer, nullable=False),
+    Column("n_records", Integer),
+    Column("last_error", Text),
+    Column("updated_at", UTCDateTime, nullable=False),
 )

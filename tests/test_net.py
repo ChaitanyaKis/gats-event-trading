@@ -121,3 +121,23 @@ async def test_max_bytes_stops_streaming_without_length(sleeper: SleepRecorder) 
     async with client(sleeper) as c:
         got = await c.get(URL, max_bytes=1200)
     assert got.too_large
+
+
+@respx.mock
+async def test_per_host_interval_override(sleeper: SleepRecorder) -> None:
+    other = "https://slow.test/x"
+    respx.get(URL).mock(return_value=httpx.Response(200))
+    respx.get(other).mock(return_value=httpx.Response(200))
+    c = PoliteClient(
+        user_agent="t",
+        min_interval_s=0,
+        host_min_interval_s={"slow.test": 3.0},
+        max_retries=0,
+        sleep=sleeper,
+    )
+    async with c:
+        await c.get(URL)
+        await c.get(URL)
+        await c.get(other)
+        await c.get(other)
+    assert len(sleeper.calls) == 1 and 2.5 < sleeper.calls[0] <= 3.0
