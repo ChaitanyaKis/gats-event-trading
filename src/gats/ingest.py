@@ -19,11 +19,15 @@ from gats.db.schema import eod_prices, instrument_snapshots, price_bands
 from gats.logging_setup import kv
 from gats.net import Fetched, FetchError, PoliteClient
 from gats.rawstore import RawStore
-from gats.sources import bse, bse_scrips, nse, nse_archives
+from gats.sources import bse, bse_scrips, nse, nse_archives, nse_symbols
 from gats.sources.models import AnnouncementRecord, ParseResult, PayloadError
 from gats.timeutil import ist_datetime, ist_today, utcnow
 
 log = logging.getLogger(__name__)
+
+# Reference files applied by gats.refdata (kept here so reparse can route them
+# without importing gats.refdata at module load: it imports this module).
+REFERENCE_KINDS = frozenset({bse_scrips.KIND, nse_symbols.KIND})
 
 
 @dataclass
@@ -804,17 +808,11 @@ def reparse_kind(svc: Services, kind: str) -> dict[str, int]:
                         available_at=_meta_available_at(meta, doc.first_fetched_at),
                     )
                     stats["updated"] += len(inst.records)
-                elif kind == bse_scrips.KIND:
+                elif kind in REFERENCE_KINDS:
                     # Local import: gats.refdata builds on this module.
-                    from gats.refdata.ingest import apply_bse_scrips
+                    from gats.refdata.ingest import reapply
 
-                    applied = apply_bse_scrips(
-                        conn,
-                        bse_scrips.parse_scrips(payload),
-                        as_of=date.fromisoformat(meta["as_of_date"]),
-                        doc_id=doc.doc_id,
-                        available_at=_meta_available_at(meta, doc.first_fetched_at),
-                    )
+                    applied = reapply(conn, kind, payload, meta, doc.doc_id, doc.first_fetched_at)
                     stats["updated"] += applied.n_changes
                 else:
                     raise ValueError(f"reparse not supported for kind {kind!r}")

@@ -41,6 +41,50 @@ class ApplyStats:
     def n_changes(self) -> int:
         return self.inserted + self.changed + self.rewritten + self.closed
 
+    @property
+    def n_records(self) -> int:
+        """Entities in the snapshot (closed ones are, by definition, absent)."""
+        return self.inserted + self.changed + self.rewritten + self.unchanged
+
+    def summary(self) -> dict[str, int]:
+        return {
+            "inserted": self.inserted,
+            "changed": self.changed,
+            "rewritten": self.rewritten,
+            "closed": self.closed,
+        }
+
+
+def log_snapshot(
+    conn: Connection,
+    *,
+    kind: str,
+    as_of: date,
+    n_records: int,
+    n_changes: int,
+    available_at: datetime,
+    raw_doc_id: str,
+    parser_version: str,
+) -> None:
+    """Record that ``kind`` was applied for ``as_of`` (one fetch per day)."""
+    repo.upsert(
+        conn,
+        refdata_snapshots,
+        [
+            {
+                "kind": kind,
+                "as_of_date": as_of,
+                "n_records": n_records,
+                "n_changes": n_changes,
+                "available_at": available_at,
+                "raw_doc_id": raw_doc_id,
+                "parser_version": parser_version,
+            }
+        ],
+        ["kind", "as_of_date"],
+        ["n_records", "n_changes", "raw_doc_id", "parser_version"],
+    )
+
 
 def apply_snapshot(
     conn: Connection,
@@ -123,20 +167,15 @@ def apply_snapshot(
             to_close,
         )
     repo.insert_ignore(conn, table, to_insert, [key, "valid_from"])
-    repo.upsert(
+    log_snapshot(
         conn,
-        refdata_snapshots,
-        [
-            {
-                "kind": kind,
-                "as_of_date": as_of,
-                "n_records": len(records),
-                "n_changes": stats.n_changes,
-                **meta,
-            }
-        ],
-        ["kind", "as_of_date"],
-        ["n_records", "n_changes", "raw_doc_id", "parser_version"],
+        kind=kind,
+        as_of=as_of,
+        n_records=len(records),
+        n_changes=stats.n_changes,
+        available_at=available_at,
+        raw_doc_id=raw_doc_id,
+        parser_version=parser_version,
     )
     return stats
 

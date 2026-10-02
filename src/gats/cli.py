@@ -31,8 +31,8 @@ from gats.net import FetchError, PoliteClient
 from gats.rawstore import RawStore
 from gats.recorder import run_recorder
 from gats.refdata.coverage import bse_scrip_isin_coverage
-from gats.refdata.ingest import ingest_bse_scrips
-from gats.sources import bse, bse_scrips, nse, nse_archives
+from gats.refdata.ingest import ingest_bse_scrips, ingest_nse_symbol_changes
+from gats.sources import bse, bse_scrips, nse, nse_archives, nse_symbols
 from gats.sources._util import preview
 from gats.sources.models import PayloadError
 from gats.status import build_report
@@ -67,6 +67,7 @@ class ReparseKind(StrEnum):
     nse_bands = nse_archives.BANDS_KIND
     nse_instruments = nse_archives.INSTRUMENTS_KIND
     bse_scrips = bse_scrips.KIND
+    nse_symbol_changes = nse_symbols.KIND
 
 
 def _settings(log_to_file: bool = True) -> Settings:
@@ -587,14 +588,21 @@ def refdata_update() -> None:
     this daily after 08:00 IST)."""
     settings = _settings()
 
-    async def main() -> Outcome:
+    async def main() -> list[tuple[str, Outcome]]:
         async with _services(settings) as svc:
-            return await ingest_bse_scrips(svc, job="refdata_update")
+            return [
+                ("bse_scrips", await ingest_bse_scrips(svc, job="refdata_update")),
+                (
+                    "nse_symbol_changes",
+                    await ingest_nse_symbol_changes(svc, job="refdata_update"),
+                ),
+            ]
 
-    outcome = asyncio.run(main())
-    _print_outcome("bse_scrips", outcome)
-    typer.echo(f"  {outcome.meta}")
-    raise typer.Exit(0 if outcome.ok else 1)
+    results = asyncio.run(main())
+    for label, outcome in results:
+        _print_outcome(label, outcome)
+        typer.echo(f"  {outcome.meta}")
+    raise typer.Exit(0 if all(o.ok for _, o in results) else 1)
 
 
 @refdata_app.command("coverage")

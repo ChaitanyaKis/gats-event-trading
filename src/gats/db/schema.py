@@ -235,3 +235,20 @@ bse_scrips = Table(
     Index(None, "isin"),
     Index(None, "symbol"),
 )
+
+# NSE's cumulative symbol-change file (history since 1999). Rows already in
+# the first fetch get available_at = the effective date at 00:00 IST (NSE
+# announces changes before they take effect); rows that appear later get
+# the fetch time.
+nse_symbol_changes = Table(
+    "nse_symbol_changes",
+    metadata,
+    Column("old_symbol", String(64), primary_key=True),
+    Column("new_symbol", String(64), primary_key=True),
+    Column("effective_date", Date, primary_key=True),
+    Column("company_name", Text),
+    Column("available_at", UTCDateTime, nullable=False),
+    Column("raw_doc_id", String(64), ForeignKey("raw_documents.doc_id"), nullable=False),
+    Column("parser_version", String(32), nullable=False),
+    Index(None, "new_symbol", "effective_date"),
+)

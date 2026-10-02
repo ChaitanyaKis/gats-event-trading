@@ -12,6 +12,8 @@ new source gets a row here before code depends on it.
 | NSE instruments | `https://nsearchives.nseindia.com/content/equities/EQUITY_L.csv` | VERIFIED 2026-09-26 | Symbol ↔ ISIN, listing date, face value (2,585 rows). Current file only. Re-probed 2026-10-02 (2,593 rows; series EQ, BE, BZ). |
 | BSE scrip list (scrip code → ISIN) | `https://api.bseindia.com/BseIndiaAPI/api/ListofScripData/w?Group=&Scripcode=&industry=&segment=Equity&status=` | VERIFIED 2026-10-02 | Details below. Real sample: `tests/fixtures/real/bse_scrips_2026-10-02.json`. |
 | BSE equity bhavcopy (UDiFF) | `https://www.bseindia.com/download/BhavCopy/Equity/BhavCopy_BSE_CM_0_0_0_YYYYMMDD_F_0000.CSV` | VERIFIED 2026-10-02 (one day, not yet used) | 200 for 2026-10-01, 884 KB. Columns `TradDt,BizDt,Sgmt,Src,FinInstrmTp,FinInstrmId,ISIN,TckrSymb,SctySrs,…,OpnPric,HghPric,LwPric,ClsPric,LastPric,PrvsClsgPric,…,TtlTradgVol,TtlTrfVal,TtlNbOfTxsExctd,…`. `FinInstrmId` = scrip code, `SctySrs` = group. History depth not probed. |
+| NSE symbol changes | `https://nsearchives.nseindia.com/content/equities/symbolchange.csv` | VERIFIED 2026-10-02 | Cumulative, **headerless**: company, old symbol, new symbol, effective date (`DD-MON-YYYY`); 1,065 rows 1999-09-15 → 2026-09-25. Effective date = first session under the new symbol (EOD has ZOMATO on 08-Apr-2025, ETERNAL on 09-Apr-2025; PREV_CLOSE carries over). Some self-maps (old = new) on debt/ETF rows. Real sample: `tests/fixtures/real/nse_symbolchange_2026-10-02.csv`. |
+| NSE name changes | `https://nsearchives.nseindia.com/content/equities/namechange.csv` | VERIFIED 2026-10-02 (not used yet) | Header `NCH_SYMBOL, NCH_PREV_NAME, NCH_NEW_NAME, NCH_DT`; 2,328 rows. |
 | BSE attachments | `https://www.bseindia.com/xml-data/corpfiling/AttachLive/<file>` (falls back to `AttachHis/`) | VERIFIED 2026-09-26 | PDFs, often large. Stored per the attachment policy. |
 
 ## BSE announcements
@@ -74,6 +76,12 @@ new source gets a row here before code depends on it.
     parser warns if the identity ever breaks.
   - `dt` (`ddmmyyyyHHMMSS`) and `sort_date` (`YYYY-MM-DD HH:MM:SS`) equal
     `an_dt` in all 2,410 rows; they are redundant and not stored.
+- **`symbol`, `sm_name` and `sm_isin` are as of the fetch, not the filing**
+  (verified 2026-10-02): a Zomato filing of 2024-08-01 is returned as
+  `ETERNAL` / `ETERNAL LIMITED`, though the symbol was ZOMATO until
+  2025-04-08. Live rows carry the symbol of their day; backfilled rows carry
+  the symbol of the backfill day. Resolve backfilled NSE symbols as of
+  `first_seen_at` (`gats.refdata.symbols.SymbolHistory`) or through the ISIN.
 - Still unmapped (no research use yet): `attFileSize`/`fileSize` (identical
   human-readable sizes such as `1.27 MB`; `0 Bytes` on 37 rows),
   `hasXbrl` (always `true`), `smIndustry` (null on 60%), and `bflag`,
@@ -83,7 +91,6 @@ new source gets a row here before code depends on it.
 
 | Need | Candidate | Task |
 |---|---|---|
-| NSE symbol changes | `nsearchives.nseindia.com/content/equities/symbolchange.csv` | T2.2 |
 | Index closes | `nsearchives.nseindia.com/content/indices/ind_close_all_DDMMYYYY.csv` | T2.7 |
 | Holidays | NSE holiday list API | T2.6 |
 | ASM/GSM lists | NSE/BSE surveillance pages | T2.9 |

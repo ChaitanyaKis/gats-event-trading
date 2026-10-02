@@ -14,3 +14,6 @@ exchange data only; nothing personal.
 | `nse_instruments_2026-10-02.csv` | `nsearchives.nseindia.com/content/equities/EQUITY_L.csv` | 2026-10-02 16:37 | 30 of 2,593 rows; every SERIES present |
 | `bse_ann_2023-10-03_page1.json` | same endpoint, `strPrevDate=strToDate=20231003`, page 1 | 2026-10-02 16:43 | first 30 of 50 rows; past-day shape (no `TotalPageCnt`, ROWCNT 996) |
 | `bse_scrips_2026-10-02.json` | `api.bseindia.com/BseIndiaAPI/api/ListofScripData/w?Group=&Scripcode=&industry=&segment=Equity&status=` | 2026-10-02 17:10 | 30 of 10,918 rows chosen to cover every Status, Segment, `NA`/empty ISINs and the two invalid ISINs |
+| `nse_symbolchange_2026-10-02.csv` | `nsearchives.nseindia.com/content/equities/symbolchange.csv` | 2026-10-02 17:20 | 12 of 1,065 lines: first two, real rename chains (ZOMATO→ETERNAL, LTI→LTIM→LTM, TELCO→TATAMOTORS→TMPV, …), a self-map and an empty company name |
+| `nse_eod_2025-04-08_excerpt.csv`, `nse_eod_2025-04-09_excerpt.csv` | `sec_bhavdata_full_08042025.csv`, `…_09042025.csv` | 2026-10-02 17:20 | header + ZOMATO/ETERNAL and RELIANCE rows: the day before and the day of the ZOMATO→ETERNAL change |
+| `nse_ann_2024-08-01_eternal.json` | NSE announcements API, `from_date=to_date=01-08-2024` | 2026-10-02 17:07 | 3 Zomato filings from 2024, reported under the *current* symbol ETERNAL |

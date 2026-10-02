@@ -5,7 +5,7 @@ Claude Code updates this after every task. Newest log entry first.
 ## Status
 
 - **Version:** 0.1.2 · **Schema:** v4 · **Milestone:** M2 (M1 waits only on T1.6, HUMAN)
-- **Next up:** T2.2 NSE symbol history
+- **Next up:** T2.3 Security master
 
 ## Waiting on the human (HUMAN)
 
@@ -32,7 +32,7 @@ are PowerShell, run from `C:\Projects\GATS`.
 
 - [x] M1 core recorder (0.1.0 → 0.1.2)
 - [ ] M1 finishing: T1.1 ✅ · T1.2 ✅ · T1.3 ✅ · T1.4 ✅ · T1.5 ✅ · T1.6
-- [ ] M2 Reference data & entity resolution: T2.1 ✅ · T2.2 · T2.3 · T2.4 · T2.5 · T2.6 · T2.7 · T2.8 · T2.9
+- [ ] M2 Reference data & entity resolution: T2.1 ✅ · T2.2 ✅ · T2.3 · T2.4 · T2.5 · T2.6 · T2.7 · T2.8 · T2.9
 - [ ] M3 Event study (G1 kill test)
 - [ ] M4 LLM extraction
 - [ ] M5 Intraday data & reaction curves (G1b)
@@ -51,6 +51,14 @@ are PowerShell, run from `C:\Projects\GATS`.
 ## Log
 
 - **2026-10-02:**
+  - T2.2 done. `symbolchange.csv` verified (headerless, 1,065 changes since
+    1999; effective date = first session under the new symbol, checked in
+    EOD files). `nse_symbol_changes` + daily job + `SymbolHistory` resolver
+    (chains, point-in-time load). **Finding:** NSE's announcements API
+    returns the *current* symbol/name/ISIN for old filings (2024 Zomato
+    filing → ETERNAL), so backfilled NSE symbols must be resolved as of
+    `first_seen_at`. Refactored refdata ingest into one generic
+    fetch→store→parse→apply path.
   - T2.1 done. BSE "List of Scrips" API verified (needs browser headers +
     homepage cookies; 10,918 scrips incl. delisted). Stored as type-2
     versions (`bse_scrips` + `refdata_snapshots` log, schema v4) instead of

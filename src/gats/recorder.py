@@ -25,8 +25,8 @@ from gats.db.repo import IngestMode
 from gats.ingest import Outcome, Services
 from gats.logging_setup import kv
 from gats.refdata import versions
-from gats.refdata.ingest import ingest_bse_scrips
-from gats.sources import bse_scrips, nse_archives
+from gats.refdata.ingest import ingest_bse_scrips, ingest_nse_symbol_changes
+from gats.sources import bse_scrips, nse_archives, nse_symbols
 from gats.timeutil import is_weekday, ist_time_of_day, ist_today
 
 log = logging.getLogger(__name__)
@@ -312,15 +312,16 @@ def build_jobs(svc: Services) -> list[Job]:
         async def fetch_bse_scrips(svc: Services) -> Outcome:
             return await ingest_bse_scrips(svc, job="bse_scrips")
 
-        jobs.append(
-            RefdataJob(
-                "bse_scrips",
-                bse_scrips.KIND,
-                s.snapshot_check_s,
-                s.daily_snapshot_after_ist,
-                fetch_bse_scrips,
+        async def fetch_symbol_changes(svc: Services) -> Outcome:
+            return await ingest_nse_symbol_changes(svc, job="nse_symbol_changes")
+
+        for name, kind, fetch in (
+            ("bse_scrips", bse_scrips.KIND, fetch_bse_scrips),
+            ("nse_symbol_changes", nse_symbols.KIND, fetch_symbol_changes),
+        ):
+            jobs.append(
+                RefdataJob(name, kind, s.snapshot_check_s, s.daily_snapshot_after_ist, fetch)
             )
-        )
     if s.attachments_enabled:
         jobs.append(AttachmentsJob("attachments", s.attachments_poll_s))
     sources = tuple(

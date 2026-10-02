@@ -56,6 +56,9 @@ class Settings(BaseSettings):
     )
     nse_bands_url: str = "https://nsearchives.nseindia.com/content/equities/sec_list.csv"
     nse_instruments_url: str = "https://nsearchives.nseindia.com/content/equities/EQUITY_L.csv"
+    nse_symbol_changes_url: str = (
+        "https://nsearchives.nseindia.com/content/equities/symbolchange.csv"
+    )
     # Verified 2026-10-02 (needs browser headers + BSE homepage cookies).
     bse_scrips_url: str = "https://api.bseindia.com/BseIndiaAPI/api/ListofScripData/w"
 

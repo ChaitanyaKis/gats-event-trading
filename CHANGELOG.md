@@ -1,7 +1,10 @@
 # Changelog
 
 ## Unreleased
-- **BSE scrip master:** a daily `bse_scrips` recorder job snapshots BSE's
+- **NSE symbol history:** a daily `nse_symbol_changes` job stores NSE's
+  symbol-change file (every rename since 1999); `gats.refdata.symbols`
+  translates a symbol between dates (e.g. ETERNAL in 2024 → ZOMATO).
+  `gats refdata update` now also fetches it.- **BSE scrip master:** a daily `bse_scrips` recorder job snapshots BSE's
   full scrip list (scrip code → ISIN, ticker, group, status, incl. delisted)
   into versioned rows. `gats refdata update` takes a snapshot now;
   `gats refdata coverage` shows how many recent filings resolve to an ISIN.
