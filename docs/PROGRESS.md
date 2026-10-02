@@ -5,7 +5,7 @@ Claude Code updates this after every task. Newest log entry first.
 ## Status
 
 - **Version:** 0.1.2 · **Schema:** v3 · **Milestone:** M1 (finishing)
-- **Next up:** T1.5 Status UX
+- **Next up:** T1.6 GitHub + CI (HUMAN) → meanwhile M2 T2.1
 
 ## Waiting on the human (HUMAN)
 
@@ -19,7 +19,7 @@ Claude Code updates this after every task. Newest log entry first.
 ## Milestones
 
 - [x] M1 core recorder (0.1.0 → 0.1.2)
-- [ ] M1 finishing: T1.1 ✅ · T1.2 ✅ · T1.3 ✅ · T1.4 ✅ · T1.5 · T1.6
+- [ ] M1 finishing: T1.1 ✅ · T1.2 ✅ · T1.3 ✅ · T1.4 ✅ · T1.5 ✅ · T1.6
 - [ ] M2 Reference data & entity resolution
 - [ ] M3 Event study (G1 kill test)
 - [ ] M4 LLM extraction
@@ -39,6 +39,11 @@ Claude Code updates this after every task. Newest log entry first.
 ## Log
 
 - **2026-10-02:**
+  - T1.5 done. `gats status` opens with plain-language problems + fixes
+    (`gats.health`: recorder never ran / stale heartbeat, job failing > 30
+    min, BSE failures/hour, data size, low disk, reconcile backlog, gave-up
+    days); new `gats doctor [--network]`. Thresholds in `Settings`. Data size
+    is an O(1) estimate (raw bytes + DB files) to keep status fast.
   - T1.4 done; history table in DATA_SOURCES.md. BSE and NSE announcements
     reach ≥ 2012; NSE `sec_bhavdata_full` is valid from **2019-10-01** (the
     30-09-2019 file holds 27-Jun-2019 rows). NSE has no `exchdisstime` and

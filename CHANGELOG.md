@@ -1,7 +1,10 @@
 # Changelog
 
 ## Unreleased
-- **Fix: BSE past days were marked complete after one page.** BSE omits
+- `gats status` starts with a health section: each problem in plain words
+  with a fix. New `gats doctor [--network]` runs the same checks plus
+  environment checks (and one request per source), exiting 1 on failure.
+  Thresholds: `GATS_STATUS_*` (see `.env.example`).- **Fix: BSE past days were marked complete after one page.** BSE omits
   `TotalPageCnt` for past days; the page count now comes from `ROWCNT`, and a
   day is complete only when at least `ROWCNT` rows were collected. Schema v3
   (upgraded automatically) adds `backfill_days.expected_records` and reopens

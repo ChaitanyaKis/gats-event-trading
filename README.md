@@ -88,7 +88,8 @@ del .env                             # back to real endpoints
 | `gats init` | Create the data directory and database |
 | `gats probe {bse,nse,eod,bands,instruments} [--date YYYY-MM-DD]` | Fetch one sample, save it, report parser coverage |
 | `gats record` | Run all recorder jobs until stopped |
-| `gats status [--json]` | Counts, latency (dissemination → stored), last fetch per job, heartbeat |
+| `gats status [--json]` | Problems in plain words first (recorder stopped, job failing > 30 min, BSE throttling, disk, reconcile backlog), then counts, latency, last fetch per job, heartbeat |
+| `gats doctor [--network]` | Health checks with a fix for each problem; `--network` makes one request per source. Exit code 1 on failure |
 | `gats backfill eod --start D --end D` | Load historical daily prices (resumable) |
 | `gats backfill announcements --source bse\|nse --start D --end D` | Load historical filings day by day (resumable) |
 | `gats reparse {bse_ann,nse_ann,nse_eod,nse_bands,nse_instruments}` | Re-run the current parser over stored raw payloads |

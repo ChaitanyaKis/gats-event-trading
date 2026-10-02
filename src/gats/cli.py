@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import os
+import platform
 import signal
 import sys
 from collections import Counter
@@ -20,8 +22,9 @@ from sqlalchemy import select
 from gats import __version__, ingest
 from gats.config import Settings
 from gats.db import repo
-from gats.db.engine import init_db, make_engine
-from gats.db.schema import fetch_log, raw_documents
+from gats.db.engine import SchemaVersionError, init_db, make_engine
+from gats.db.schema import SCHEMA_VERSION, fetch_log, raw_documents
+from gats.health import Problem, evaluate
 from gats.ingest import Outcome, Services
 from gats.logging_setup import configure_logging
 from gats.net import FetchError, PoliteClient
@@ -394,6 +397,16 @@ def inspect_bad(
         typer.echo(f"      body:  {preview(body, 300)}")
 
 
+def _print_problems(problems: list[Problem]) -> None:
+    if not problems:
+        typer.echo("health:        no problems found")
+        return
+    typer.echo(f"health:        {len(problems)} problem(s)")
+    for problem in problems:
+        typer.echo(f"  [{problem.level.upper()}] {problem.message}")
+        typer.echo(f"         fix: {problem.fix}")
+
+
 @app.command()
 def status(as_json: Annotated[bool, typer.Option("--json")] = False) -> None:
     """Show what has been recorded and whether jobs are healthy."""
@@ -402,19 +415,28 @@ def status(as_json: Annotated[bool, typer.Option("--json")] = False) -> None:
     init_db(engine)
     now = utcnow()
     with engine.begin() as conn:
-        report = build_report(conn, now, settings.heartbeat_path)
+        report = build_report(conn, now, settings)
     engine.dispose()
+    problems = evaluate(report, now, settings)
     if as_json:
-        typer.echo(json.dumps(asdict(report), indent=2, default=str))
+        payload = {**asdict(report), "problems": [asdict(p) for p in problems]}
+        typer.echo(json.dumps(payload, indent=2, default=str))
         return
 
+    _print_problems(problems)
     typer.echo(f"announcements: {report.announcements_by_source_mode or 'none'}")
     typer.echo(f"attachments:   {report.attachments_by_status or 'none'}")
     typer.echo(f"eod:           {report.eod_days} days, latest {report.eod_latest}")
     typer.echo(f"bands:         latest {report.bands_latest}")
     typer.echo(f"instruments:   latest {report.instruments_latest}")
     typer.echo(f"backfill days: {report.backfill_days or 'none'}")
+    typer.echo(f"reconcile:     {report.reconcile_queue} recent source-days still to fetch")
     typer.echo(f"raw store:     {report.raw_docs} docs, {report.raw_bytes / 1e6:.1f} MB")
+    free_gb = report.disk_free_bytes / 1e9 if report.disk_free_bytes is not None else None
+    typer.echo(
+        f"disk:          ~{report.data_bytes / 1e9:.2f} GB used"
+        + (f", {free_gb:.1f} GB free" if free_gb is not None else "")
+    )
     typer.echo("live latency (s, dissemination -> stored, last 24h):")
     for src, summary in report.live_latency_s.items():
         typer.echo(f"  {src}: " + ", ".join(f"{k}={v:.1f}" for k, v in summary.items()))
@@ -432,3 +454,120 @@ def status(as_json: Annotated[bool, typer.Option("--json")] = False) -> None:
                 f"  {job:20} last_ok={info.get('last_ok_at')} "
                 f"failures={info.get('consecutive_failures', 0)}"
             )
+
+
+async def _network_checks(svc: Services) -> list[tuple[str, bool, str]]:
+    """One light request per source. The answer is parsed, so a format change
+    shows up as a failure rather than a reassuring HTTP 200."""
+    s = svc.settings
+    today = ist_today()
+    results: list[tuple[str, bool, str]] = []
+
+    async def check(name: str, url: str, parse: Any, **kwargs: Any) -> None:
+        try:
+            got = await svc.client.get(url, **kwargs)
+        except FetchError as exc:
+            results.append((name, False, str(exc)))
+            return
+        if not got.ok:
+            results.append((name, False, f"HTTP {got.status}"))
+            return
+        try:
+            n = len(parse(got.content).records)
+        except PayloadError as exc:
+            results.append((name, False, f"parse failed: {exc}"))
+            return
+        results.append((name, True, f"HTTP {got.status}, {n} records"))
+
+    await check(
+        "BSE announcements",
+        s.bse_announcements_url,
+        lambda b: bse.parse_announcements(b, attachment_base=s.bse_attachment_live_base),
+        params=bse.request_params(today, today, 1),
+        headers=bse.request_headers(s.bse_referer),
+        warmup_url=s.bse_referer if s.bse_warmup else None,
+    )
+    await check(
+        "NSE announcements",
+        s.nse_announcements_url,
+        nse.parse_announcements,
+        params=nse.request_params(today, today),
+        headers=nse.request_headers(s.nse_announcements_referer),
+        warmup_url=s.nse_home_url,
+    )
+    await check(
+        "NSE price bands", s.nse_bands_url, nse_archives.parse_bands, warmup_url=s.nse_home_url
+    )
+    await check(
+        "NSE instruments",
+        s.nse_instruments_url,
+        nse_archives.parse_instruments,
+        warmup_url=s.nse_home_url,
+    )
+    return results
+
+
+@app.command()
+def doctor(
+    network: Annotated[
+        bool, typer.Option(help="Also make one request per exchange source.")
+    ] = False,
+) -> None:
+    """Run health checks and print how to fix each problem (exit code 1 on failure)."""
+    settings = _settings(log_to_file=False)
+    failed = False
+
+    def line(ok: bool, what: str, fix: str | None = None) -> None:
+        typer.echo(f"[{'ok' if ok else 'FAIL':4}] {what}")
+        if fix:
+            typer.echo(f"       fix: {fix}")
+
+    py_ok = sys.version_info >= (3, 11)
+    failed |= not py_ok
+    line(
+        py_ok,
+        f"python {platform.python_version()} on {platform.system()}",
+        None if py_ok else "Install Python 3.11+ and recreate .venv.",
+    )
+
+    data_dir = settings.data_dir.resolve()
+    writable = data_dir.exists() and os.access(data_dir, os.W_OK)
+    failed |= not writable
+    line(
+        writable,
+        f"data dir {data_dir}",
+        None if writable else "Run `gats init`, or point GATS_DATA_DIR at a writable folder.",
+    )
+
+    engine = make_engine(settings.resolved_db_url)
+    try:
+        init_db(engine)
+    except SchemaVersionError as exc:
+        engine.dispose()
+        line(False, f"database: {exc}", "Update GATS: git pull, then pip install -e .[dev]")
+        raise typer.Exit(1) from exc
+    now = utcnow()
+    with engine.begin() as conn:
+        report = build_report(conn, now, settings)
+    engine.dispose()
+    line(True, f"database schema v{SCHEMA_VERSION}")
+
+    for problem in evaluate(report, now, settings):
+        failed |= problem.level == "fail"
+        typer.echo(f"[{'FAIL' if problem.level == 'fail' else 'warn':4}] {problem.message}")
+        typer.echo(f"       fix: {problem.fix}")
+
+    if network:
+
+        async def run() -> list[tuple[str, bool, str]]:
+            async with _services(settings) as svc:
+                return await _network_checks(svc)
+
+        for name, ok, detail in asyncio.run(run()):
+            failed |= not ok
+            line(
+                ok,
+                f"{name}: {detail}",
+                None if ok else "Run `gats probe` for this source; see docs/DATA_SOURCES.md.",
+            )
+    raise typer.Exit(1 if failed else 0)

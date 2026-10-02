@@ -154,6 +154,14 @@ class Settings(BaseSettings):
 
     job_error_backoff_max_s: float = Field(default=900.0, gt=0)
 
+    # Health thresholds for `gats status` / `gats doctor`.
+    status_heartbeat_stale_min: float = Field(default=15.0, gt=0)
+    status_job_failing_min: float = Field(default=30.0, gt=0)
+    status_bse_failures_warn: int = Field(default=10, ge=1)  # failed BSE fetches per hour
+    status_data_warn_gb: float = Field(default=50.0, gt=0)
+    status_disk_free_warn_gb: float = Field(default=5.0, ge=0)
+    status_reconcile_queue_warn: int = Field(default=4, ge=0)
+
     @property
     def resolved_db_url(self) -> str:
         if self.db_url:
