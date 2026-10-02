@@ -1,17 +1,21 @@
 """NSE corporate announcements.
 
-ENDPOINT AND FIELD NAMES ARE UNVERIFIED: they are based on the JSON API that
-powers nseindia.com's corporate-filings page, which the build environment
-could not reach. NSE only serves this API to sessions holding cookies from the
-homepage, so requests go through ``PoliteClient.get(..., warmup_url=...)``.
-Run ``gats probe nse`` before relying on it.
+Endpoint and field mapping verified against the live API (2026-09-26,
+re-probed 2026-10-02). NSE only serves this API to sessions holding cookies
+from the homepage, so requests go through ``PoliteClient.get(...,
+warmup_url=...)``.
+
+Timestamps (evidence in docs/DATA_SOURCES.md, T1.3): ``an_dt`` is the
+exchange receipt time and ``exchdisstime`` the dissemination time. On 2,410
+real rows ``difference`` equalled ``exchdisstime - an_dt`` exactly (0-3 s),
+and ``dt``/``sort_date`` are reformatted copies of ``an_dt``.
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
-from datetime import date
+from datetime import date, timedelta
 from typing import Any
 
 from gats.sources._util import clean_str, looks_like_html, pick, preview
@@ -20,7 +24,7 @@ from gats.timeutil import parse_ist_datetime
 
 SOURCE = "NSE"
 KIND = "nse_ann"
-PARSER_VERSION = "nse-ann-v1"
+PARSER_VERSION = "nse-ann-v2"
 
 KNOWN_FIELDS = frozenset(
     {
@@ -35,6 +39,10 @@ KNOWN_FIELDS = frozenset(
         "sort_date",
         "exchdisstime",
         "smindustry",
+        # Redundant with an_dt/exchdisstime (see module docstring); `difference`
+        # is used only as a consistency check.
+        "dt",
+        "difference",
     }
 )
 
@@ -65,6 +73,19 @@ def _rows(payload: bytes) -> list[dict[str, Any]]:
             f"NSE payload is neither a list nor {{'data': [...]}}: {preview(payload)}"
         )
     return [row for row in data if isinstance(row, dict)]
+
+
+def _parse_hms(raw: object) -> timedelta | None:
+    """``HH:MM:SS`` (optionally negative) as a timedelta, or None."""
+    text = clean_str(raw)
+    if text is None:
+        return None
+    sign = -1 if text.startswith("-") else 1
+    try:
+        hours, minutes, seconds = (int(part) for part in text.lstrip("-").split(":"))
+    except ValueError:
+        return None
+    return sign * timedelta(hours=hours, minutes=minutes, seconds=seconds)
 
 
 def _fallback_id(row: dict[str, Any]) -> str:
@@ -104,10 +125,22 @@ def parse_announcements(payload: bytes) -> ParseResult[AnnouncementRecord]:
             result.warnings.append(f"row {index}: missing seq_id, using content hash {ann_id}")
 
         disseminated = parse_ist_datetime(pick(row, "exchdisstime"))
-        announced = parse_ist_datetime(pick(row, "an_dt", "sort_date"))
-        event_ts = disseminated or announced
+        received = parse_ist_datetime(pick(row, "an_dt", "sort_date"))
+        event_ts = disseminated or received
         if event_ts is None:
             result.warnings.append(f"row {index} ({ann_id}): no parseable timestamp")
+        reported = _parse_hms(pick(row, "difference"))
+        # The receipt-time mapping rests on this identity; flag drift.
+        if (
+            disseminated
+            and received
+            and reported is not None
+            and (disseminated - received != reported)
+        ):
+            result.warnings.append(
+                f"row {index} ({ann_id}): difference {reported} != "
+                f"exchdisstime - an_dt {disseminated - received}"
+            )
 
         result.records.append(
             AnnouncementRecord(
@@ -122,8 +155,7 @@ def parse_announcements(payload: bytes) -> ParseResult[AnnouncementRecord]:
                 subject=clean_str(pick(row, "desc")),
                 details=clean_str(pick(row, "attchmntText")),
                 attachment_url=clean_str(pick(row, "attchmntFile")),
-                # NSE's receipt-time field is not identified yet; `probe` will show it.
-                exch_submitted_ts=None,
+                exch_submitted_ts=received,
                 exch_disseminated_ts=disseminated,
                 event_ts=event_ts,
             )

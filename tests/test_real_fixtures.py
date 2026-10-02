@@ -117,9 +117,26 @@ class TestNseReal:
             assert record.isin and ISIN.match(record.isin)
             assert record.exch_disseminated_ts is not None
             assert to_ist(record.exch_disseminated_ts).date() == date(2026, 10, 2)
+            # an_dt is the receipt time: at most a few seconds before dissemination.
+            assert record.exch_submitted_ts is not None
+            lag = record.exch_disseminated_ts - record.exch_submitted_ts
+            assert timedelta(0) <= lag <= timedelta(seconds=5)
             assert record.attachment_url and record.attachment_url.startswith(
                 "https://nsearchives.nseindia.com/corporate/"
             )
+
+    def test_unmapped_fields_match_data_sources_doc(
+        self, parsed: ParseResult[AnnouncementRecord]
+    ) -> None:
+        assert set(parsed.meta["unknown_fields"]) == {
+            "attfilesize",
+            "bflag",
+            "csvname",
+            "filesize",
+            "hasxbrl",
+            "old_new",
+            "orgid",
+        }
 
     def test_unique_ids(self, parsed: ParseResult[AnnouncementRecord]) -> None:
         ids = [r.source_ann_id for r in parsed.records]

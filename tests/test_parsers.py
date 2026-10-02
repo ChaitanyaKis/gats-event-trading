@@ -84,7 +84,21 @@ class TestNse:
         assert record.symbol == "EXAMPLE"
         assert record.isin == "INE000A01010"
         assert record.exch_disseminated_ts == datetime(2026, 9, 25, 4, 45, 31, tzinfo=UTC)
+        assert record.exch_submitted_ts == datetime(2026, 9, 25, 4, 45, 30, tzinfo=UTC)
         assert record.event_ts == record.exch_disseminated_ts
+
+    def test_difference_consistent_with_timestamps_is_silent(self) -> None:
+        result = nse.parse_announcements(json.dumps([nse_row("1", difference="00:00:01")]).encode())
+        assert result.warnings == []
+
+    def test_difference_drift_is_flagged(self) -> None:
+        result = nse.parse_announcements(json.dumps([nse_row("1", difference="00:05:00")]).encode())
+        assert len(result.records) == 1
+        assert "difference" in result.warnings[0]
+
+    def test_unparseable_difference_is_ignored(self) -> None:
+        result = nse.parse_announcements(json.dumps([nse_row("1", difference="n/a")]).encode())
+        assert result.warnings == []
 
     def test_data_wrapper_and_fallback_id(self) -> None:
         payload = json.dumps({"data": [nse_row(None)]}).encode()

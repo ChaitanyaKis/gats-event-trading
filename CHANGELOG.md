@@ -1,7 +1,9 @@
 # Changelog
 
 ## Unreleased
-- Tests run against trimmed real exchange payloads (`tests/fixtures/real/`),
+- NSE announcements now store the exchange receipt time (`an_dt`) as
+  `exch_submitted_ts` (parser `nse-ann-v2`); run `gats reparse nse_ann` to
+  update rows recorded earlier.- Tests run against trimmed real exchange payloads (`tests/fixtures/real/`),
   made with `scripts/trim_fixture.py`.
 
 ## 0.1.2 (2026-09-28)

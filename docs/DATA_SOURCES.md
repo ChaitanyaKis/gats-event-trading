@@ -33,8 +33,20 @@ new source gets a row here before code depends on it.
 - Observed live lag ~150 s at a 120 s poll.
 - Fields used: `seq_id`, `symbol`, `sm_isin`, `sm_name`, `desc`,
   `attchmntText`, `attchmntFile`, `an_dt`, `exchdisstime`.
-- Unmapped (T1.3): `attfilesize`, `bflag`, `csvname`, `difference`, `dt`,
-  `filesize`, `hasxbrl`, `old_new`, `orgid`.
+- **Timestamps (T1.3, parser `nse-ann-v2`, verified 2026-10-02):**
+  - `an_dt` → `exch_submitted_ts` (exchange receipt time);
+    `exchdisstime` → `exch_disseminated_ts` (= `event_ts`).
+  - Evidence, 2,410 rows from 2026-09-25, 2026-09-30 and 2026-10-02:
+    `difference` equals `exchdisstime − an_dt` **exactly in every row**
+    (0 s: 342, 1 s: 1,791, 2 s: 275, 3 s: 2). NSE computes this lag from
+    `an_dt`, so `an_dt` is the earlier exchange-side time, i.e. receipt. The
+    parser warns if the identity ever breaks.
+  - `dt` (`ddmmyyyyHHMMSS`) and `sort_date` (`YYYY-MM-DD HH:MM:SS`) equal
+    `an_dt` in all 2,410 rows; they are redundant and not stored.
+- Still unmapped (no research use yet): `attFileSize`/`fileSize` (identical
+  human-readable sizes such as `1.27 MB`; `0 Bytes` on 37 rows),
+  `hasXbrl` (always `true`), `smIndustry` (null on 60%), and `bflag`,
+  `csvName`, `old_new`, `orgid` (always null).
 
 ## To verify (candidates; do not rely on these until probed)
 
