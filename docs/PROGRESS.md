@@ -14,7 +14,7 @@ are PowerShell, run from `C:\Projects\GATS`.
 
 1. **Start the recorder** in its own terminal and leave it running (PC
    awake: Settings → System → Power → Screen and sleep → Never when plugged in):
-   `powershell -ExecutionPolicy Bypass -File scriptsun_recorder.ps1`
+   `powershell -ExecutionPolicy Bypass -File scripts\run_recorder.ps1`
    Check it any time with `.venv\Scripts\gats status`.
 2. **T1.6 GitHub + CI.** `gh` 2.96 is installed but not logged in.
    ```powershell
