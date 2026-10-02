@@ -19,7 +19,7 @@ from gats.db.schema import eod_prices, instrument_snapshots, price_bands
 from gats.logging_setup import kv
 from gats.net import Fetched, FetchError, PoliteClient
 from gats.rawstore import RawStore
-from gats.sources import bse, nse, nse_archives
+from gats.sources import bse, bse_scrips, nse, nse_archives
 from gats.sources.models import AnnouncementRecord, ParseResult, PayloadError
 from gats.timeutil import ist_datetime, ist_today, utcnow
 
@@ -90,7 +90,7 @@ def announcement_source(settings: Settings, kind: str) -> _AnnSource:
     raise ValueError(f"not an announcement kind: {kind}")
 
 
-async def _safe_get(svc: Services, url: str, **kwargs: Any) -> Fetched | Outcome:
+async def safe_get(svc: Services, url: str, **kwargs: Any) -> Fetched | Outcome:
     try:
         return await svc.client.get(url, **kwargs)
     except FetchError as exc:
@@ -241,7 +241,7 @@ async def collect_bse(
 
     async def fetch_page_once(page: int) -> Outcome:
         params = bse.request_params(start, end, page)
-        got = await _safe_get(
+        got = await safe_get(
             svc,
             settings.bse_announcements_url,
             params=params,
@@ -249,7 +249,7 @@ async def collect_bse(
             warmup_url=warmup,
         )
         if isinstance(got, Outcome):
-            _log_transport_failure(svc, job, settings.bse_announcements_url, got)
+            log_transport_failure(svc, job, settings.bse_announcements_url, got)
             return got
         return _ingest_announcement_payload(
             svc, src, got, job=job, mode=mode, request_meta={"params": params}
@@ -337,7 +337,7 @@ async def collect_nse(
 ) -> Outcome:
     settings = svc.settings
     params = nse.request_params(start, end)
-    got = await _safe_get(
+    got = await safe_get(
         svc,
         settings.nse_announcements_url,
         params=params,
@@ -345,7 +345,7 @@ async def collect_nse(
         warmup_url=settings.nse_home_url,
     )
     if isinstance(got, Outcome):
-        _log_transport_failure(svc, job, settings.nse_announcements_url, got)
+        log_transport_failure(svc, job, settings.nse_announcements_url, got)
         return got
     outcome = _ingest_announcement_payload(
         svc, _nse_source(), got, job=job, mode=mode, request_meta={"params": params}
@@ -394,7 +394,7 @@ async def backfill_day(
     return outcome
 
 
-def _log_transport_failure(svc: Services, job: str, url: str, outcome: Outcome) -> None:
+def log_transport_failure(svc: Services, job: str, url: str, outcome: Outcome) -> None:
     with svc.engine.begin() as conn:
         repo.log_fetch(
             conn,
@@ -413,9 +413,9 @@ def _log_transport_failure(svc: Services, job: str, url: str, outcome: Outcome) 
 async def ingest_eod_day(svc: Services, day: date, *, job: str, mode: IngestMode) -> Outcome:
     settings = svc.settings
     url = nse_archives.eod_url(settings.nse_eod_url_template, day)
-    got = await _safe_get(svc, url, warmup_url=settings.nse_home_url)
+    got = await safe_get(svc, url, warmup_url=settings.nse_home_url)
     if isinstance(got, Outcome):
-        _log_transport_failure(svc, job, url, got)
+        log_transport_failure(svc, job, url, got)
         return got
     if got.status == 404:
         # Normal on holidays and before publication; logged so retries are bounded.
@@ -451,7 +451,7 @@ async def ingest_eod_day(svc: Services, day: date, *, job: str, mode: IngestMode
     try:
         parsed = nse_archives.parse_eod(got.content, trade_date=day)
     except PayloadError as exc:
-        return _record_bad_daily(
+        return record_bad_payload(
             svc,
             got,
             job=job,
@@ -503,7 +503,7 @@ async def ingest_eod_day(svc: Services, day: date, *, job: str, mode: IngestMode
     )
 
 
-def _record_bad_daily(
+def record_bad_payload(
     svc: Services,
     got: Fetched,
     *,
@@ -511,14 +511,16 @@ def _record_bad_daily(
     kind: str,
     error: PayloadError,
     meta: dict[str, Any],
+    source: str = nse_archives.SOURCE,
 ) -> Outcome:
+    """Keep a payload that failed to parse: it is the evidence for the fix."""
     with svc.engine.begin() as conn:
         doc_id = repo.save_raw(
             conn,
             svc.store,
             got.content,
             kind=f"bad_{kind}",
-            source=nse_archives.SOURCE,
+            source=source,
             url=got.url,
             content_type=got.content_type,
             fetched_at=got.fetched_at,
@@ -557,9 +559,9 @@ async def ingest_snapshot(svc: Services, what: str, *, job: str) -> Outcome:
     else:
         raise ValueError(f"unknown snapshot: {what}")
 
-    got = await _safe_get(svc, url, warmup_url=settings.nse_home_url)
+    got = await safe_get(svc, url, warmup_url=settings.nse_home_url)
     if isinstance(got, Outcome):
-        _log_transport_failure(svc, job, url, got)
+        log_transport_failure(svc, job, url, got)
         return got
     if not got.ok:
         with svc.engine.begin() as conn:
@@ -590,7 +592,7 @@ async def ingest_snapshot(svc: Services, what: str, *, job: str) -> Outcome:
             instruments = nse_archives.parse_instruments(got.content)
             n, warnings = len(instruments.records), instruments.warnings
     except PayloadError as exc:
-        return _record_bad_daily(svc, got, job=job, kind=kind, error=exc, meta=meta)
+        return record_bad_payload(svc, got, job=job, kind=kind, error=exc, meta=meta)
 
     with svc.engine.begin() as conn:
         doc_id = repo.save_raw(
@@ -694,7 +696,7 @@ async def fetch_pending_attachments(svc: Services, *, job: str) -> Outcome:
 
         status, doc_id, error = "missing", None, None
         for url in candidates:
-            got = await _safe_get(svc, url, warmup_url=warmup, max_bytes=max_bytes)
+            got = await safe_get(svc, url, warmup_url=warmup, max_bytes=max_bytes)
             if isinstance(got, Outcome):
                 status, error = "failed", got.error
                 continue
@@ -802,6 +804,18 @@ def reparse_kind(svc: Services, kind: str) -> dict[str, int]:
                         available_at=_meta_available_at(meta, doc.first_fetched_at),
                     )
                     stats["updated"] += len(inst.records)
+                elif kind == bse_scrips.KIND:
+                    # Local import: gats.refdata builds on this module.
+                    from gats.refdata.ingest import apply_bse_scrips
+
+                    applied = apply_bse_scrips(
+                        conn,
+                        bse_scrips.parse_scrips(payload),
+                        as_of=date.fromisoformat(meta["as_of_date"]),
+                        doc_id=doc.doc_id,
+                        available_at=_meta_available_at(meta, doc.first_fetched_at),
+                    )
+                    stats["updated"] += applied.n_changes
                 else:
                     raise ValueError(f"reparse not supported for kind {kind!r}")
         except PayloadError as exc:

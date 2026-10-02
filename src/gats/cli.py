@@ -30,7 +30,9 @@ from gats.logging_setup import configure_logging
 from gats.net import FetchError, PoliteClient
 from gats.rawstore import RawStore
 from gats.recorder import run_recorder
-from gats.sources import bse, nse, nse_archives
+from gats.refdata.coverage import bse_scrip_isin_coverage
+from gats.refdata.ingest import ingest_bse_scrips
+from gats.sources import bse, bse_scrips, nse, nse_archives
 from gats.sources._util import preview
 from gats.sources.models import PayloadError
 from gats.status import build_report
@@ -41,6 +43,8 @@ app = typer.Typer(
 )
 backfill_app = typer.Typer(no_args_is_help=True, help="Load historical data.")
 app.add_typer(backfill_app, name="backfill")
+refdata_app = typer.Typer(no_args_is_help=True, help="Reference data: security master.")
+app.add_typer(refdata_app, name="refdata")
 
 
 class ProbeTarget(StrEnum):
@@ -62,6 +66,7 @@ class ReparseKind(StrEnum):
     nse_eod = nse_archives.EOD_KIND
     nse_bands = nse_archives.BANDS_KIND
     nse_instruments = nse_archives.INSTRUMENTS_KIND
+    bse_scrips = bse_scrips.KIND
 
 
 def _settings(log_to_file: bool = True) -> Settings:
@@ -571,3 +576,44 @@ def doctor(
                 None if ok else "Run `gats probe` for this source; see docs/DATA_SOURCES.md.",
             )
     raise typer.Exit(1 if failed else 0)
+
+
+# --- refdata ---------------------------------------------------------------------------
+
+
+@refdata_app.command("update")
+def refdata_update() -> None:
+    """Take today's snapshot of the reference files now (the recorder does
+    this daily after 08:00 IST)."""
+    settings = _settings()
+
+    async def main() -> Outcome:
+        async with _services(settings) as svc:
+            return await ingest_bse_scrips(svc, job="refdata_update")
+
+    outcome = asyncio.run(main())
+    _print_outcome("bse_scrips", outcome)
+    typer.echo(f"  {outcome.meta}")
+    raise typer.Exit(0 if outcome.ok else 1)
+
+
+@refdata_app.command("coverage")
+def refdata_coverage(
+    days: Annotated[int, typer.Option(help="Look back this many days.")] = 30,
+    top: Annotated[int, typer.Option(help="Unresolved identifiers to list.")] = 15,
+) -> None:
+    """How many recent filings resolve to a security."""
+    settings = _settings(log_to_file=False)
+    engine = make_engine(settings.resolved_db_url)
+    init_db(engine)
+    since = utcnow() - timedelta(days=days)
+    with engine.begin() as conn:
+        reports = [bse_scrip_isin_coverage(conn, since, top)]
+    engine.dispose()
+    for cov in reports:
+        typer.echo(
+            f"{cov.label} (last {days} days): filings {cov.resolved_filings}/{cov.n_filings} "
+            f"= {cov.filing_share:.1%}, ids {cov.resolved_ids}/{cov.n_ids} = {cov.id_share:.1%}"
+        )
+        for ident, name, n in cov.unresolved:
+            typer.echo(f"  unresolved {ident:>10}  {n:5} filings  {name}")

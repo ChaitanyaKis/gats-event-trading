@@ -4,8 +4,8 @@ Claude Code updates this after every task. Newest log entry first.
 
 ## Status
 
-- **Version:** 0.1.2 · **Schema:** v3 · **Milestone:** M1 (finishing)
-- **Next up:** T1.6 GitHub + CI (HUMAN) → meanwhile M2 T2.1
+- **Version:** 0.1.2 · **Schema:** v4 · **Milestone:** M2 (M1 waits only on T1.6, HUMAN)
+- **Next up:** T2.2 NSE symbol history
 
 ## Waiting on the human (HUMAN)
 
@@ -32,7 +32,7 @@ are PowerShell, run from `C:\Projects\GATS`.
 
 - [x] M1 core recorder (0.1.0 → 0.1.2)
 - [ ] M1 finishing: T1.1 ✅ · T1.2 ✅ · T1.3 ✅ · T1.4 ✅ · T1.5 ✅ · T1.6
-- [ ] M2 Reference data & entity resolution
+- [ ] M2 Reference data & entity resolution: T2.1 ✅ · T2.2 · T2.3 · T2.4 · T2.5 · T2.6 · T2.7 · T2.8 · T2.9
 - [ ] M3 Event study (G1 kill test)
 - [ ] M4 LLM extraction
 - [ ] M5 Intraday data & reaction curves (G1b)
@@ -51,6 +51,15 @@ are PowerShell, run from `C:\Projects\GATS`.
 ## Log
 
 - **2026-10-02:**
+  - T2.1 done. BSE "List of Scrips" API verified (needs browser headers +
+    homepage cookies; 10,918 scrips incl. delisted). Stored as type-2
+    versions (`bse_scrips` + `refdata_snapshots` log, schema v4) instead of
+    daily copies (~4M rows/yr saved); daily `bse_scrips` recorder job,
+    `gats refdata update|coverage`. Coverage on the 30-day backfill: see the
+    T2.1 coverage entry (≥ 95% required). BSE UDiFF bhavcopy also verified
+    (one day), kept for later.
+  - Decision: M2 schema changes all land in v4 (additive tables); a DB
+    already at v4 gains new M2 tables through create_all().
   - T1.5 done. `gats status` opens with plain-language problems + fixes
     (`gats.health`: recorder never ran / stale heartbeat, job failing > 30
     min, BSE failures/hour, data size, low disk, reconcile backlog, gave-up

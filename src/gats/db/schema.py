@@ -35,7 +35,7 @@ from sqlalchemy import (
 
 from gats.db.types import UTCDateTime
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 metadata = MetaData(
     naming_convention={
@@ -191,4 +191,47 @@ backfill_days = Table(
     Column("expected_records", Integer),
     Column("last_error", Text),
     Column("updated_at", UTCDateTime, nullable=False),
+)
+
+
+# --- v4: reference data (M2) ---------------------------------------------------
+# Every application of a current-only reference file (one that the source
+# republishes in full and keeps no history of) is logged here. A version row
+# below is known to hold on every logged date between its valid_from and
+# valid_to.
+refdata_snapshots = Table(
+    "refdata_snapshots",
+    metadata,
+    Column("kind", String(32), primary_key=True),
+    Column("as_of_date", Date, primary_key=True),
+    Column("n_records", Integer, nullable=False),
+    Column("n_changes", Integer, nullable=False),
+    Column("available_at", UTCDateTime, nullable=False),
+    Column("raw_doc_id", String(64), ForeignKey("raw_documents.doc_id"), nullable=False),
+    Column("parser_version", String(32), nullable=False),
+)
+
+# BSE scrip master as versions (type-2 slowly changing dimension): a new row
+# only when a scrip's attributes change. 11k scrips as daily snapshots would
+# cost ~4M rows a year for almost no information.
+bse_scrips = Table(
+    "bse_scrips",
+    metadata,
+    Column("scrip_code", String(16), primary_key=True),
+    Column("valid_from", Date, primary_key=True),  # first snapshot showing this version
+    Column("valid_to", Date),  # first snapshot no longer showing it; NULL = current
+    Column("symbol", String(64)),
+    Column("name", Text),
+    Column("issuer_name", Text),
+    Column("isin", String(12)),
+    Column("status", String(16)),
+    Column("scrip_group", String(8)),
+    Column("face_value", Float),
+    Column("segment", String(32)),
+    Column("industry", Text),
+    Column("available_at", UTCDateTime, nullable=False),  # when this version was first seen
+    Column("raw_doc_id", String(64), ForeignKey("raw_documents.doc_id"), nullable=False),
+    Column("parser_version", String(32), nullable=False),
+    Index(None, "isin"),
+    Index(None, "symbol"),
 )

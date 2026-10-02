@@ -1,7 +1,11 @@
 # Changelog
 
 ## Unreleased
-- `gats status` starts with a health section: each problem in plain words
+- **BSE scrip master:** a daily `bse_scrips` recorder job snapshots BSE's
+  full scrip list (scrip code → ISIN, ticker, group, status, incl. delisted)
+  into versioned rows. `gats refdata update` takes a snapshot now;
+  `gats refdata coverage` shows how many recent filings resolve to an ISIN.
+  Schema v4 (automatic upgrade).- `gats status` starts with a health section: each problem in plain words
   with a fix. New `gats doctor [--network]` runs the same checks plus
   environment checks (and one request per source), exiting 1 on failure.
   Thresholds: `GATS_STATUS_*` (see `.env.example`).- **Fix: BSE past days were marked complete after one page.** BSE omits

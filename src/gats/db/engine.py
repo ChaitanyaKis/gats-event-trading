@@ -41,9 +41,17 @@ def _v2_to_v3(conn: Connection) -> None:
     )
 
 
+def _v3_to_v4(conn: Connection) -> None:
+    """v4 only added reference-data tables, which create_all() has made."""
+
+
 # Upgrade steps keyed by the version they start from. Each must be additive
 # and safe to run on a database that create_all() has just touched.
-_UPGRADES: dict[int, Callable[[Connection], None]] = {1: _v1_to_v2, 2: _v2_to_v3}
+_UPGRADES: dict[int, Callable[[Connection], None]] = {
+    1: _v1_to_v2,
+    2: _v2_to_v3,
+    3: _v3_to_v4,
+}
 
 
 def make_engine(url: str) -> Engine:

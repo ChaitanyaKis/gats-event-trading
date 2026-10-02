@@ -288,7 +288,7 @@ class TestSchemaUpgrade:
                 text("SELECT value FROM schema_meta WHERE key='schema_version'")
             ).scalar_one()
             conn.execute(select(backfill_days)).all()  # table exists
-        assert int(version) == SCHEMA_VERSION == 3
+        assert int(version) == SCHEMA_VERSION
         engine.dispose()
 
     def test_v2_database_gains_column_and_reopens_truncated_bse_days(self, tmp_path: Path) -> None:
@@ -327,7 +327,7 @@ class TestSchemaUpgrade:
             version = conn.execute(
                 text("SELECT value FROM schema_meta WHERE key='schema_version'")
             ).scalar_one()
-        assert version == "3"
+        assert version == str(SCHEMA_VERSION)
         assert rows[("BSE", "2026-09-21")] == ("incomplete", 0, None)
         assert rows[("BSE", "2026-09-22")][0] == "complete"
         assert rows[("BSE", "2026-09-23")][0] == "complete"

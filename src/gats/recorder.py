@@ -13,6 +13,7 @@ import json
 import logging
 import os
 import tempfile
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
@@ -23,7 +24,9 @@ from gats.db import repo
 from gats.db.repo import IngestMode
 from gats.ingest import Outcome, Services
 from gats.logging_setup import kv
-from gats.sources import nse_archives
+from gats.refdata import versions
+from gats.refdata.ingest import ingest_bse_scrips
+from gats.sources import bse_scrips, nse_archives
 from gats.timeutil import is_weekday, ist_time_of_day, ist_today
 
 log = logging.getLogger(__name__)
@@ -177,6 +180,30 @@ class SnapshotJob:
 
 
 @dataclass
+class RefdataJob:
+    """A current-only reference file, applied once a day as a versioned
+    snapshot (``gats.refdata.versions``)."""
+
+    name: str
+    kind: str
+    check_s: float
+    after: time
+    fetch: Callable[[Services], Awaitable[Outcome]]
+
+    def interval_s(self, now: datetime) -> float:
+        return self.check_s
+
+    async def run_once(self, svc: Services) -> Outcome:
+        now = svc.clock()
+        if ist_time_of_day(now) < self.after:
+            return Outcome(ok=True, meta={"skipped": "before daily window"})
+        with svc.engine.begin() as conn:
+            if versions.has_snapshot(conn, self.kind, ist_today(now)):
+                return Outcome(ok=True, meta={"skipped": "already have today"})
+        return await self.fetch(svc)
+
+
+@dataclass
 class AttachmentsJob:
     name: str
     poll_s: float
@@ -278,6 +305,20 @@ def build_jobs(svc: Services) -> list[Job]:
         jobs.append(
             SnapshotJob(
                 "nse_instruments", "instruments", s.snapshot_check_s, s.daily_snapshot_after_ist
+            )
+        )
+    if s.refdata_enabled:
+
+        async def fetch_bse_scrips(svc: Services) -> Outcome:
+            return await ingest_bse_scrips(svc, job="bse_scrips")
+
+        jobs.append(
+            RefdataJob(
+                "bse_scrips",
+                bse_scrips.KIND,
+                s.snapshot_check_s,
+                s.daily_snapshot_after_ist,
+                fetch_bse_scrips,
             )
         )
     if s.attachments_enabled:

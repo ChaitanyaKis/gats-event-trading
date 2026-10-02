@@ -10,6 +10,8 @@ new source gets a row here before code depends on it.
 | NSE EOD + delivery | `https://nsearchives.nseindia.com/products/content/sec_bhavdata_full_DDMMYYYY.csv` | VERIFIED 2026-09-26 | 3,507 rows (2026-09-25). `DELIV_*` is `-` for non-EQ series. Available after ~18:00 IST. 404 on holidays. Re-probed 2026-10-02 (3,534 rows for 2026-10-01; series EQ, SM, BE, ST, GS, GB, BZ, IV, RR, E1, N1). |
 | NSE price bands | `https://nsearchives.nseindia.com/content/equities/sec_list.csv` | VERIFIED 2026-09-26 | Current file only (3,556 rows), so history exists only from the first recording. Re-probed 2026-10-02 (3,574 rows). `Remarks` carries GSM stages (`GSM STAGE - 0` … `IV`), `-` otherwise; `Band` is 2/5/10/20/40 or `No Band`. |
 | NSE instruments | `https://nsearchives.nseindia.com/content/equities/EQUITY_L.csv` | VERIFIED 2026-09-26 | Symbol ↔ ISIN, listing date, face value (2,585 rows). Current file only. Re-probed 2026-10-02 (2,593 rows; series EQ, BE, BZ). |
+| BSE scrip list (scrip code → ISIN) | `https://api.bseindia.com/BseIndiaAPI/api/ListofScripData/w?Group=&Scripcode=&industry=&segment=Equity&status=` | VERIFIED 2026-10-02 | Details below. Real sample: `tests/fixtures/real/bse_scrips_2026-10-02.json`. |
+| BSE equity bhavcopy (UDiFF) | `https://www.bseindia.com/download/BhavCopy/Equity/BhavCopy_BSE_CM_0_0_0_YYYYMMDD_F_0000.CSV` | VERIFIED 2026-10-02 (one day, not yet used) | 200 for 2026-10-01, 884 KB. Columns `TradDt,BizDt,Sgmt,Src,FinInstrmTp,FinInstrmId,ISIN,TckrSymb,SctySrs,…,OpnPric,HghPric,LwPric,ClsPric,LastPric,PrvsClsgPric,…,TtlTradgVol,TtlTrfVal,TtlNbOfTxsExctd,…`. `FinInstrmId` = scrip code, `SctySrs` = group. History depth not probed. |
 | BSE attachments | `https://www.bseindia.com/xml-data/corpfiling/AttachLive/<file>` (falls back to `AttachHis/`) | VERIFIED 2026-09-26 | PDFs, often large. Stored per the attachment policy. |
 
 ## BSE announcements
@@ -35,6 +37,25 @@ new source gets a row here before code depends on it.
   `bsenewsid`, `criticalnews`, `datainsdate`, `filestatus`, `fld_attachsize`,
   `investor_presentation`, `more`, `nsurl`, `old`, `quarter_id`, `recordid`,
   `rn`, `timediff`, `xml_name`.
+
+## BSE scrip list
+
+- Every equity scrip ever listed when `status` is empty: 10,918 rows on
+  2026-10-02 (Active 5,069, Delisted 4,617, Suspended 1,229, `N` 3);
+  `status=Active` gives 5,069. Segment `Equity` (9,952), `PreferenceShares`
+  (123) or empty (843). REITs/InvITs are **not** included.
+- Fields: `SCRIP_CD` (6 digits, unique), `scrip_id` (ticker), `Scrip_Name`,
+  `Issuer_Name`, `Status`, `GROUP`, `FACE_VALUE`, `ISIN_NUMBER`, `Segment`,
+  `INDUSTRY` (often null), `NSURL`, `Mktcap` (units undocumented; not stored).
+- `ISIN_NUMBER`: 8,579 valid; `NA` 1,668, empty 669 (almost all delisted);
+  two malformed (`INE546A1014`, `0`). 41 ISINs appear under two scrip codes
+  (relistings).
+- **Access:** bare clients get an Akamai 403; the API answers with
+  browser-like headers (`Accept-Language`, `Referer`/`Origin`
+  `https://www.bseindia.com`) after loading the BSE homepage, which
+  `PoliteClient` does.
+- Current-only: history is built from daily snapshots (`bse_scrips`
+  versions, `refdata_snapshots` log) from 2026-10-02.
 
 ## NSE announcements
 
@@ -62,7 +83,6 @@ new source gets a row here before code depends on it.
 
 | Need | Candidate | Task |
 |---|---|---|
-| BSE scrip → ISIN | bseindia.com "List of Scrips" API; BSE bhavcopy (newer formats) | T2.1 |
 | NSE symbol changes | `nsearchives.nseindia.com/content/equities/symbolchange.csv` | T2.2 |
 | Index closes | `nsearchives.nseindia.com/content/indices/ind_close_all_DDMMYYYY.csv` | T2.7 |
 | Holidays | NSE holiday list API | T2.6 |

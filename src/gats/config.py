@@ -56,6 +56,8 @@ class Settings(BaseSettings):
     )
     nse_bands_url: str = "https://nsearchives.nseindia.com/content/equities/sec_list.csv"
     nse_instruments_url: str = "https://nsearchives.nseindia.com/content/equities/EQUITY_L.csv"
+    # Verified 2026-10-02 (needs browser headers + BSE homepage cookies).
+    bse_scrips_url: str = "https://api.bseindia.com/BseIndiaAPI/api/ListofScripData/w"
 
     # Recorder schedule
     bse_enabled: bool = True
@@ -141,6 +143,7 @@ class Settings(BaseSettings):
     eod_max_missing_attempts: int = Field(default=3, ge=1)
 
     snapshots_enabled: bool = True
+    refdata_enabled: bool = True  # BSE scrip list (and later reference files)
     snapshot_check_s: float = Field(default=1800.0, gt=0)
     daily_snapshot_after_ist: time = time(8, 0)
 
