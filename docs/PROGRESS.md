@@ -5,7 +5,7 @@ Claude Code updates this after every task. Newest log entry first.
 ## Status
 
 - **Version:** 0.1.2 · **Schema:** v2 · **Milestone:** M1 (finishing)
-- **Next up:** T1.1 Bootstrap & health check
+- **Next up:** T1.2 Real fixtures
 
 ## Waiting on the human (HUMAN)
 
@@ -19,7 +19,7 @@ Claude Code updates this after every task. Newest log entry first.
 ## Milestones
 
 - [x] M1 core recorder (0.1.0 → 0.1.2)
-- [ ] M1 finishing: T1.1 · T1.2 · T1.3 · T1.4 · T1.5 · T1.6
+- [ ] M1 finishing: T1.1 ✅ · T1.2 · T1.3 · T1.4 · T1.5 · T1.6
 - [ ] M2 Reference data & entity resolution
 - [ ] M3 Event study (G1 kill test)
 - [ ] M4 LLM extraction
@@ -38,6 +38,17 @@ Claude Code updates this after every task. Newest log entry first.
 
 ## Log
 
+- **2026-10-02:**
+  - T1.1 done. Environment: Windows 11 Home (10.0.26200), Python 3.14.2
+    (CI tests 3.11/3.12), fresh `.venv`. `data/` did not exist; `gats init`
+    created it (empty DB, schema v2). ruff, mypy strict and 103 tests green;
+    `gats version` = 0.1.2.
+  - Six tracked files (CLAUDE.md, pyproject.toml, README.md, CHANGELOG.md,
+    .gitignore, .env.example) were deleted in the working tree, apparently by
+    accident; restored from HEAD.
+  - Decision: the user asked for autonomous end-to-end work, so HUMAN steps
+    and gates are queued under "Waiting on the human" and work continues on
+    every task whose dependencies are met, instead of stopping.
 - **2026-09-28:**
   - 0.1.2 built in a Claude.ai session and handed to Claude Code, with
     CLAUDE.md, the roadmap and this tracker.
