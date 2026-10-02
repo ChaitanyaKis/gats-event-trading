@@ -9,8 +9,20 @@ Claude Code updates this after every task. Newest log entry first.
 
 ## Waiting on the human (HUMAN)
 
-- Keep the recorder running in its own terminal (PC awake, sleep disabled):
-  `powershell -ExecutionPolicy Bypass -File scripts\run_recorder.ps1`
+Do these in order; each is independent of Claude's ongoing work. Commands
+are PowerShell, run from `C:\Projects\GATS`.
+
+1. **Start the recorder** in its own terminal and leave it running (PC
+   awake: Settings → System → Power → Screen and sleep → Never when plugged in):
+   `powershell -ExecutionPolicy Bypass -File scriptsun_recorder.ps1`
+   Check it any time with `.venv\Scripts\gats status`.
+2. **T1.6 GitHub + CI.** `gh` 2.96 is installed but not logged in.
+   ```powershell
+   gh auth login            # GitHub.com → HTTPS → Login with a web browser
+   gh repo create gats --private --source . --remote origin --push
+   gh run watch             # wait for CI (Ubuntu + Windows, Py 3.11/3.12/3.14)
+   ```
+   Then send back the CI run URL (or type `/gats`; Claude checks `gh run list`).
 
 ## Blocked
 
