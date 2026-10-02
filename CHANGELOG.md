@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+- Tests run against trimmed real exchange payloads (`tests/fixtures/real/`),
+  made with `scripts/trim_fixture.py`.
+
 ## 0.1.2 (2026-09-28)
 Fixes from the first days of live running.
 - **BSE throttling:** a page that should hold rows but returns `{}` or an HTML

@@ -5,7 +5,7 @@ Claude Code updates this after every task. Newest log entry first.
 ## Status
 
 - **Version:** 0.1.2 · **Schema:** v2 · **Milestone:** M1 (finishing)
-- **Next up:** T1.2 Real fixtures
+- **Next up:** T1.3 NSE extra fields
 
 ## Waiting on the human (HUMAN)
 
@@ -19,7 +19,7 @@ Claude Code updates this after every task. Newest log entry first.
 ## Milestones
 
 - [x] M1 core recorder (0.1.0 → 0.1.2)
-- [ ] M1 finishing: T1.1 ✅ · T1.2 · T1.3 · T1.4 · T1.5 · T1.6
+- [ ] M1 finishing: T1.1 ✅ · T1.2 ✅ · T1.3 · T1.4 · T1.5 · T1.6
 - [ ] M2 Reference data & entity resolution
 - [ ] M3 Event study (G1 kill test)
 - [ ] M4 LLM extraction
@@ -39,6 +39,10 @@ Claude Code updates this after every task. Newest log entry first.
 ## Log
 
 - **2026-10-02:**
+  - T1.2 done. All five probes pass live (BSE 272 rows/6 pages, NSE 110 rows,
+    EOD 3,534 rows for 01-Oct, bands 3,574, instruments 2,593). Trimmed
+    samples in `tests/fixtures/real/` (byte-exact via `.gitattributes`), 13
+    tests. Finding: `sec_list.csv` remarks carry GSM stages (useful for T2.9).
   - T1.1 done. Environment: Windows 11 Home (10.0.26200), Python 3.14.2
     (CI tests 3.11/3.12), fresh `.venv`. `data/` did not exist; `gats init`
     created it (empty DB, schema v2). ruff, mypy strict and 103 tests green;

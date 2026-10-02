@@ -1,9 +1,8 @@
 """Shared fixtures.
 
-Exchange payload builders below are SYNTHETIC: they mirror the formats the
-parsers expect, which could not be verified against the live sites from the
-build sandbox. Once `gats probe` captures real samples, add them under
-tests/fixtures/ and test against those too.
+Exchange payload builders below are SYNTHETIC: they make it easy to build
+edge cases (throttled pages, missing ids). Trimmed real payloads live in
+tests/fixtures/real/ and are tested in test_real_fixtures.py.
 """
 
 from __future__ import annotations
