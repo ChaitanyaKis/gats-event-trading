@@ -3,6 +3,10 @@
 Endpoint and field mapping verified against the live API on 2026-09-26:
 50 rows per page, newest first. The API serves ONE DAY per query; a
 multi-day range returns ``{}``. ``gats probe bse`` re-checks the mapping.
+
+Past days come from a different row shape (verified 2026-10-02 on dates back
+to 2018): no ``TotalPageCnt``, a few renamed fields, but ``Table1.ROWCNT``
+still gives the day's total, so the page count is derived from it.
 """
 
 from __future__ import annotations
@@ -18,6 +22,7 @@ from gats.timeutil import parse_ist_datetime
 SOURCE = "BSE"
 KIND = "bse_ann"
 PARSER_VERSION = "bse-ann-v1"
+PAGE_SIZE = 50  # rows per page, verified 2026-09-26 and 2026-10-02
 
 # Fields the mapping below understands; anything else is reported by `probe`.
 KNOWN_FIELDS = frozenset(
@@ -99,7 +104,11 @@ def parse_announcements(payload: bytes, *, attachment_base: str) -> ParseResult[
     if meta.get("empty_object"):
         result.warnings.append("BSE returned {} (no data served for this query)")
     if rows:
-        result.meta["total_pages"] = to_int(pick(rows[0], "TotalPageCnt"))
+        pages = to_int(pick(rows[0], "TotalPageCnt"))
+        row_count = meta.get("row_count")
+        if pages is None and row_count is not None:
+            pages = max(1, -(-row_count // PAGE_SIZE))  # ceil division
+        result.meta["total_pages"] = pages
     unknown: set[str] = set()
 
     for index, row in enumerate(rows):

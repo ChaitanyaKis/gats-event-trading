@@ -30,9 +30,14 @@ DAY = date(2026, 9, 25)
 HTML_BLOCK = b"<!DOCTYPE html><html><body>Access Denied</body></html>"
 
 
-def page(n: int, total: int, ids: list[str]) -> httpx.Response:
+def page(n: int, total: int | None, ids: list[str], row_count: int | None = None) -> httpx.Response:
     rows = [bse_row(i, f"2026-09-25T10:{59 - k:02d}:00") for k, i in enumerate(ids)]
-    return httpx.Response(200, content=bse_payload(rows, total_pages=total))
+    return httpx.Response(200, content=bse_payload(rows, total_pages=total, row_count=row_count))
+
+
+def full_page(n: int, total: int | None, row_count: int, size: int = 50) -> httpx.Response:
+    """A realistic page of ``size`` rows with ids unique per page."""
+    return page(n, total, [f"p{n}-{k}" for k in range(size)], row_count=row_count)
 
 
 def status_of(svc: Services, source: str, day: date) -> tuple[str, int] | None:
@@ -113,6 +118,62 @@ class TestBseThrottling:
                 svc, DAY, DAY, job="t", mode="live", max_pages=1, stop_when_no_new=True
             )
         assert home.call_count == 1
+
+
+class TestBsePastDayShape:
+    """BSE omits TotalPageCnt for past days (verified 2026-10-02); 0.1.2 then
+    fetched one page and marked the day complete."""
+
+    @respx.mock
+    async def test_page_count_comes_from_rowcnt(self, svc: Services) -> None:
+        routes = [
+            respx.get(BSE_URL, params__contains={"pageno": str(n)}).mock(
+                return_value=full_page(n, None, row_count=120, size=50 if n < 3 else 20)
+            )
+            for n in (1, 2, 3)
+        ]
+        outcome = await collect_bse(
+            svc, DAY, DAY, job="t", mode="backfill", max_pages=50, stop_when_no_new=False
+        )
+        assert [r.call_count for r in routes] == [1, 1, 1]
+        assert outcome.ok and outcome.meta["complete"]
+        assert outcome.n_records == 120 and outcome.meta["expected_records"] == 120
+
+    @respx.mock
+    async def test_fewer_rows_than_rowcnt_is_incomplete(self, svc: Services) -> None:
+        respx.get(BSE_URL, params__contains={"pageno": "1"}).mock(
+            return_value=full_page(1, 2, row_count=120)
+        )
+        respx.get(BSE_URL, params__contains={"pageno": "2"}).mock(
+            return_value=full_page(2, 2, row_count=120, size=10)
+        )
+        outcome = await collect_bse(
+            svc, DAY, DAY, job="t", mode="backfill", max_pages=50, stop_when_no_new=False
+        )
+        assert not outcome.meta["complete"]
+        assert outcome.error == "BSE gave 60 of 120 rows"
+
+    @respx.mock
+    async def test_full_page_without_any_count_is_not_complete(self, svc: Services) -> None:
+        respx.get(BSE_URL).mock(
+            return_value=httpx.Response(
+                200,
+                content=bse_payload(
+                    [bse_row(f"r{k}") for k in range(50)], total_pages=None, row_count=None
+                ),
+            )
+        )
+        outcome = await backfill_day(svc, "BSE", DAY, job="t", max_pages=50)
+        assert outcome.meta["backfill_status"] == "incomplete"
+        assert "no page count" in (outcome.error or "")
+
+    @respx.mock
+    async def test_backfill_records_expected_rows(self, svc: Services) -> None:
+        respx.get(BSE_URL).mock(return_value=page(1, None, ["a", "b"], row_count=2))
+        await backfill_day(svc, "BSE", DAY, job="t", max_pages=50)
+        with svc.engine.begin() as conn:
+            row = conn.execute(select(backfill_days)).one()
+        assert (row.status, row.n_records, row.expected_records) == ("complete", 2, 2)
 
 
 class TestBackfillDay:
@@ -227,7 +288,50 @@ class TestSchemaUpgrade:
                 text("SELECT value FROM schema_meta WHERE key='schema_version'")
             ).scalar_one()
             conn.execute(select(backfill_days)).all()  # table exists
-        assert int(version) == SCHEMA_VERSION == 2
+        assert int(version) == SCHEMA_VERSION == 3
+        engine.dispose()
+
+    def test_v2_database_gains_column_and_reopens_truncated_bse_days(self, tmp_path: Path) -> None:
+        engine = make_engine(f"sqlite:///{tmp_path / 'v2.db'}")
+        others = [t for name, t in metadata.tables.items() if name != "backfill_days"]
+        metadata.create_all(engine, tables=others)
+        with engine.begin() as conn:
+            conn.execute(text("INSERT INTO schema_meta VALUES ('schema_version', '2')"))
+            conn.execute(
+                text(
+                    "CREATE TABLE backfill_days (source VARCHAR(8), day DATE, "
+                    "status VARCHAR(16) NOT NULL, attempts INTEGER NOT NULL, n_records INTEGER, "
+                    "last_error TEXT, updated_at DATETIME NOT NULL, PRIMARY KEY (source, day))"
+                )
+            )
+            for source, day, n in [
+                ("BSE", "2026-09-21", 50),  # truncated by the 0.1.2 bug
+                ("BSE", "2026-09-22", 37),  # genuinely short day
+                ("BSE", "2026-09-23", 1250),
+                ("NSE", "2026-09-21", 50),
+            ]:
+                conn.execute(
+                    text(
+                        "INSERT INTO backfill_days VALUES "
+                        "(:s, :d, 'complete', 1, :n, NULL, '2026-09-28 00:00:00')"
+                    ),
+                    {"s": source, "d": day, "n": n},
+                )
+        init_db(engine)
+        init_db(engine)  # idempotent
+        with engine.begin() as conn:
+            rows = {
+                (r.source, str(r.day)): (r.status, r.attempts, r.expected_records)
+                for r in conn.execute(select(backfill_days))
+            }
+            version = conn.execute(
+                text("SELECT value FROM schema_meta WHERE key='schema_version'")
+            ).scalar_one()
+        assert version == "3"
+        assert rows[("BSE", "2026-09-21")] == ("incomplete", 0, None)
+        assert rows[("BSE", "2026-09-22")][0] == "complete"
+        assert rows[("BSE", "2026-09-23")][0] == "complete"
+        assert rows[("NSE", "2026-09-21")][0] == "complete"
         engine.dispose()
 
     def test_newer_database_is_refused(self, tmp_path: Path) -> None:

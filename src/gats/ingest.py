@@ -295,10 +295,18 @@ async def collect_bse(
         total.meta["complete"] = True  # a real, empty Table
         return total
 
-    reported_pages = int(first.meta.get("total_pages") or 1)
+    expected = first.meta.get("row_count")
+    pages_meta = first.meta.get("total_pages")
+    if pages_meta is None and first.n_records >= bse.PAGE_SIZE:
+        # A full first page and no page count: completeness cannot be judged.
+        total.meta.update(expected_records=expected)
+        total.error = "BSE gave no page count for a full page"
+        total.ok = False
+        return total
+    reported_pages = int(pages_meta or 1)
     total_pages = min(reported_pages, max_pages)
     descending = bool(first.meta.get("descending", True))
-    total.meta.update(descending=descending, total_pages=reported_pages)
+    total.meta.update(descending=descending, total_pages=reported_pages, expected_records=expected)
     if stop_when_no_new and descending and first.n_new == 0:
         # Newest-first and nothing new on page 1 means nothing new anywhere.
         return total
@@ -314,7 +322,13 @@ async def collect_bse(
             return total
         if stop_when_no_new and outcome.n_new == 0:
             return total
-    total.meta["complete"] = reported_pages <= max_pages
+    # Every page fetched is not enough: BSE's ROWCNT must also be met, so a
+    # wrong page count can never mark a short day complete again.
+    total.meta["complete"] = reported_pages <= max_pages and (
+        expected is None or total.n_records >= expected
+    )
+    if not total.meta["complete"] and reported_pages <= max_pages:
+        total.error = f"BSE gave {total.n_records} of {expected} rows"
     return total
 
 
@@ -355,6 +369,7 @@ async def backfill_day(
         )
     elif source == nse.SOURCE:
         outcome = await collect_nse(svc, day, day, job=job, mode="backfill")
+        outcome.meta.setdefault("expected_records", outcome.n_records if outcome.ok else None)
     else:
         raise ValueError(f"unknown source: {source}")
     complete = bool(outcome.ok and outcome.meta.get("complete"))
@@ -370,6 +385,7 @@ async def backfill_day(
             day,
             complete=complete,
             n_records=outcome.n_records,
+            expected_records=outcome.meta.get("expected_records"),
             error=None if complete else (outcome.error or "incomplete"),
             now=svc.clock(),
             max_attempts=svc.settings.reconcile_max_attempts,

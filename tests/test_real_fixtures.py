@@ -99,6 +99,19 @@ class TestBseReal:
         }
 
 
+def test_bse_past_day_page_count_comes_from_rowcnt() -> None:
+    # Past days have no TotalPageCnt and rename two fields (BSENewsid,
+    # Investor_Presentation); the mapping must still be complete.
+    parsed = bse.parse_announcements(load("bse_ann_2023-10-03_page1.json"), attachment_base=LIVE)
+    assert parsed.warnings == []
+    assert parsed.meta["row_count"] == 996
+    assert parsed.meta["total_pages"] == 20  # ceil(996 / 50)
+    assert "totalpagecnt" not in parsed.meta["unknown_fields"]
+    for record in parsed.records:
+        assert record.exch_disseminated_ts and record.scrip_code and record.category
+        assert to_ist(record.exch_disseminated_ts).date() == date(2023, 10, 3)
+
+
 class TestNseReal:
     @pytest.fixture
     def parsed(

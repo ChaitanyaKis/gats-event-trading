@@ -124,10 +124,20 @@ def bse_row(news_id: str, dissem: str = "2026-09-25T10:15:30.123", **extra: Any)
     return row
 
 
-def bse_payload(rows: list[dict[str, Any]], total_pages: int = 1) -> bytes:
+def bse_payload(
+    rows: list[dict[str, Any]], total_pages: int | None = 1, row_count: int | None = None
+) -> bytes:
+    """A BSE page. ``total_pages=None`` mimics past days (no TotalPageCnt);
+    ``row_count`` is the day's total (Table1.ROWCNT), omitted when None."""
     for row in rows:
-        row["TotalPageCnt"] = total_pages
-    return json.dumps({"Table": rows, "Table1": [{"ROWCNT": len(rows) * total_pages}]}).encode()
+        if total_pages is None:
+            row.pop("TotalPageCnt", None)
+        else:
+            row["TotalPageCnt"] = total_pages
+    data: dict[str, Any] = {"Table": rows}
+    if row_count is not None:
+        data["Table1"] = [{"ROWCNT": row_count}]
+    return json.dumps(data).encode()
 
 
 def nse_row(seq_id: str | None, **extra: Any) -> dict[str, Any]:

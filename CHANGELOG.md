@@ -1,7 +1,11 @@
 # Changelog
 
 ## Unreleased
-- NSE announcements now store the exchange receipt time (`an_dt`) as
+- **Fix: BSE past days were marked complete after one page.** BSE omits
+  `TotalPageCnt` for past days; the page count now comes from `ROWCNT`, and a
+  day is complete only when at least `ROWCNT` rows were collected. Schema v3
+  (upgraded automatically) adds `backfill_days.expected_records` and reopens
+  BSE days the bug had closed, so the reconcile job refetches them.- NSE announcements now store the exchange receipt time (`an_dt`) as
   `exch_submitted_ts` (parser `nse-ann-v2`); run `gats reparse nse_ann` to
   update rows recorded earlier.- Tests run against trimmed real exchange payloads (`tests/fixtures/real/`),
   made with `scripts/trim_fixture.py`.

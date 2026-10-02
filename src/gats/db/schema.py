@@ -35,7 +35,7 @@ from sqlalchemy import (
 
 from gats.db.types import UTCDateTime
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 metadata = MetaData(
     naming_convention={
@@ -178,6 +178,8 @@ instrument_snapshots = Table(
 # v2: per-day backfill bookkeeping. A day is skipped by later backfills only
 # once it is `complete`; `gave_up` stops automatic retries (manual backfill
 # still retries it).
+# v3: `expected_records` (BSE's ROWCNT; NSE's row count) so completeness can be
+# audited as n_records >= expected_records.
 backfill_days = Table(
     "backfill_days",
     metadata,
@@ -186,6 +188,7 @@ backfill_days = Table(
     Column("status", String(16), nullable=False),  # complete | incomplete | gave_up
     Column("attempts", Integer, nullable=False),
     Column("n_records", Integer),
+    Column("expected_records", Integer),
     Column("last_error", Text),
     Column("updated_at", UTCDateTime, nullable=False),
 )

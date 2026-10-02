@@ -481,6 +481,7 @@ def record_backfill_day(
     error: str | None,
     now: datetime,
     max_attempts: int,
+    expected_records: int | None = None,
 ) -> str:
     """Record one backfill attempt for ``(source, day)``; return the new status."""
     attempts = (
@@ -507,12 +508,13 @@ def record_backfill_day(
                 "status": status,
                 "attempts": attempts,
                 "n_records": n_records,
+                "expected_records": expected_records,
                 "last_error": error[:2000] if error else None,
                 "updated_at": now,
             }
         ],
         ["source", "day"],
-        ["status", "attempts", "n_records", "last_error", "updated_at"],
+        ["status", "attempts", "n_records", "expected_records", "last_error", "updated_at"],
     )
     return status
 
