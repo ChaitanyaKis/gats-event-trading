@@ -12,3 +12,4 @@ exchange data only; nothing personal.
 | `nse_eod_2026-10-01.csv` | `nsearchives.nseindia.com/products/content/sec_bhavdata_full_01102026.csv` | 2026-10-02 16:37 | 30 of 3,534 rows; every SERIES present |
 | `nse_bands_2026-10-02.csv` | `nsearchives.nseindia.com/content/equities/sec_list.csv` | 2026-10-02 16:37 | 30 of 3,574 rows; every Series, Band and Remarks value present |
 | `nse_instruments_2026-10-02.csv` | `nsearchives.nseindia.com/content/equities/EQUITY_L.csv` | 2026-10-02 16:37 | 30 of 2,593 rows; every SERIES present |
+| `bse_ann_2023-10-03_page1.json` | same endpoint, `strPrevDate=strToDate=20231003`, page 1 | 2026-10-02 16:43 | first 30 of 50 rows; past-day shape (no `TotalPageCnt`, ROWCNT 996) |

@@ -21,6 +21,16 @@ new source gets a row here before code depends on it.
 - Fields used: `NEWSID`, `SCRIP_CD`, `SLONGNAME`, `CATEGORYNAME`,
   `SUBCATNAME`, `NEWSSUB`, `HEADLINE`, `ATTACHMENTNAME`, `DissemDT`,
   `News_submission_dt`, `NEWS_DT`.
+- **Past days use a different row shape** (verified 2026-10-02, dates
+  2012–2026): no `TotalPageCnt`, no `DataInsDate`/`RECORDID`, and
+  `BSENewsid`/`Investor_Presentation` in place of `BSENEWSID`/
+  `INVESTOR_PRESENTATION`. `Table1[0].ROWCNT` still gives the day's total, so
+  the page count is `ceil(ROWCNT / 50)`. 0.1.2 read only `TotalPageCnt` and
+  marked past days complete after one page; fixed in schema v3, which also
+  reopens such days. Verified by a full backfill of 2023-10-03: 20 pages,
+  996 distinct rows = ROWCNT.
+- A day counts as complete only when every page was fetched **and** at
+  least ROWCNT rows were collected (`backfill_days.expected_records`).
 - Unmapped: `agenda_id`, `announcement_type`, `audio_video_file`,
   `bsenewsid`, `criticalnews`, `datainsdate`, `filestatus`, `fld_attachsize`,
   `investor_presentation`, `more`, `nsurl`, `old`, `quarter_id`, `recordid`,
@@ -59,6 +69,31 @@ new source gets a row here before code depends on it.
 | ASM/GSM lists | NSE/BSE surveillance pages | T2.9 |
 | Minute candles | Upstox historical candle API v3 (1-min since Jan 2022, per its docs) | T5.1 |
 
-## History depth (T1.4)
+## History depth (T1.4, probed 2026-10-02)
 
-To be filled: the earliest verified date per source.
+One day probed per point (weekdays; 2 Oct is a market holiday). "✓" = 200
+and the current parser reads it with no warnings.
+
+| Probe date | BSE announcements | NSE announcements | NSE `sec_bhavdata_full` |
+|---|---|---|---|
+| 2026-09-02 (1 month) | ✓ 1,887 rows | ✓ 790 | ✓ 3,482 |
+| 2025-10-01 (1 year) | ✓ 1,584 | ✓ 629 | ✓ 3,008 |
+| 2024-10-01 (2 years) | ✓ 1,798 | ✓ 785 | ✓ 2,717 |
+| 2023-10-03 (3 years) | ✓ 996 (full day backfilled) | ✓ 500 | ✓ 2,551 |
+| 2021-10-01 (5 years) | ✓ 2,776 | ✓ 728 | ✓ 2,096 |
+| 2018-10-01 (8 years) | ✓ 1,955 | ✓ 425 | 404 |
+| 2015-10-01 | ✓ 854 | ✓ 440 | — |
+| 2012-10-01 | ✓ 822 | ✓ 329 | — |
+
+**Earliest verified dates**
+
+| Source | Earliest verified | Caveats |
+|---|---|---|
+| BSE announcements | ≤ 2012-10-01 (deeper not probed) | `DissemDT` (to the ms) and `News_submission_dt` from 2018; 2015 has `DissemDT` but no submission time; 2012 has neither, so `event_ts` falls back to `NEWS_DT`. 2021-10-01: submission time on 31/50 rows. |
+| NSE announcements | ≤ 2012-10-01 (deeper not probed) | `exchdisstime` exists from **≤ 2020-08-03** (absent on 2020-07-01 and earlier). Before that `an_dt` has **minute precision** (`HH:MM:00`) and is the only timestamp, so `event_ts` may be up to 59 s early; studies must treat those events as available at the end of the minute. |
+| NSE `sec_bhavdata_full` | **2019-10-01** | Files 404 for every probed date up to 2019-09-27. The file named `sec_bhavdata_full_30092019.csv` exists but contains **27-Jun-2019** rows; the parser's DATE1 check rejects it (0 records). From 2019-10-01 DATE1 matches the file name (checked 01-Oct-2019 … 01-Jul-2020). |
+
+Older EOD data needs a different source (candidates, **unverified**: NSE's
+historical CM bhavcopy zips and separate delivery files). No parser is built
+for them yet (T1.4 scope). For M3, ~7 years of EOD (Oct 2019 →) is
+available, which bounds the event study's window.

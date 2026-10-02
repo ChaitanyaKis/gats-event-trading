@@ -4,8 +4,8 @@ Claude Code updates this after every task. Newest log entry first.
 
 ## Status
 
-- **Version:** 0.1.2 · **Schema:** v2 · **Milestone:** M1 (finishing)
-- **Next up:** T1.4 History depth
+- **Version:** 0.1.2 · **Schema:** v3 · **Milestone:** M1 (finishing)
+- **Next up:** T1.5 Status UX
 
 ## Waiting on the human (HUMAN)
 
@@ -19,7 +19,7 @@ Claude Code updates this after every task. Newest log entry first.
 ## Milestones
 
 - [x] M1 core recorder (0.1.0 → 0.1.2)
-- [ ] M1 finishing: T1.1 ✅ · T1.2 ✅ · T1.3 ✅ · T1.4 · T1.5 · T1.6
+- [ ] M1 finishing: T1.1 ✅ · T1.2 ✅ · T1.3 ✅ · T1.4 ✅ · T1.5 · T1.6
 - [ ] M2 Reference data & entity resolution
 - [ ] M3 Event study (G1 kill test)
 - [ ] M4 LLM extraction
@@ -39,6 +39,14 @@ Claude Code updates this after every task. Newest log entry first.
 ## Log
 
 - **2026-10-02:**
+  - T1.4 done; history table in DATA_SOURCES.md. BSE and NSE announcements
+    reach ≥ 2012; NSE `sec_bhavdata_full` is valid from **2019-10-01** (the
+    30-09-2019 file holds 27-Jun-2019 rows). NSE has no `exchdisstime` and
+    only minute-precision `an_dt` before ~Aug 2020.
+  - **Bug found and fixed (schema v3):** BSE past days have no
+    `TotalPageCnt`, so 0.1.2 marked them complete after one page. Page count
+    now from ROWCNT; completeness needs n_records ≥ ROWCNT. Verified with a
+    real backfill of 2023-10-03 (996/996 rows).
   - T1.3 done. NSE `an_dt` mapped to `exch_submitted_ts` (receipt time):
     `difference == exchdisstime − an_dt` exactly on 2,410/2,410 real rows.
     Parser `nse-ann-v2` warns if that identity breaks. `reparse nse_ann` ran
