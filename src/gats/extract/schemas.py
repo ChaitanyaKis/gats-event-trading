@@ -19,6 +19,10 @@ from gats.extract.money import parse_amount
 
 Currency = Literal["INR", "USD", "EUR", "GBP", "AED"]
 
+# Rupee amounts below this are stamps, fees and signature-block noise in the
+# real sample (a "RS20" beside a signature), never the value of an order.
+MIN_ORDER_INR = 100_000.0
+
 
 class OrderWin(BaseModel):
     """One order or contract win, as disclosed."""
@@ -27,7 +31,7 @@ class OrderWin(BaseModel):
 
     amount_text: str | None = Field(
         default=None,
-        max_length=120,
+        max_length=300,  # amounts in words run long
         description="The amount exactly as written, e.g. 'Rs. 60 crore'.",
     )
     amount: float | None = Field(default=None, ge=0, description="Derived from amount_text.")

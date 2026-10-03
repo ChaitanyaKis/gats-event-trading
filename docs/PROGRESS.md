@@ -4,8 +4,8 @@ Claude Code updates this after every task. Newest log entry first.
 
 ## Status
 
-- **Version:** 0.2.0 · **Schema:** v5 · **Milestone:** M3 (M1 waits only on T1.6, HUMAN)
-- **Next up:** M4 T4.4 Local LLM extractor (HUMAN: Ollama) (M3's real run waits on the T3.0 backfill: item 3)
+- **Version:** 0.2.0 · **Schema:** v6 · **Milestone:** M3 (M1 waits only on T1.6, HUMAN)
+- **Next up:** M4 T4.5 Labelled eval set: build `gats label`, then the human labels (M3's real run waits on the T3.0 backfill: item 3)
 
 ## Waiting on the human (HUMAN)
 
@@ -68,7 +68,7 @@ are PowerShell, run from `C:\Projects\GATS`.
 - [ ] M1 finishing: T1.1 ✅ · T1.2 ✅ · T1.3 ✅ · T1.4 ✅ · T1.5 ✅ · T1.6
 - [x] M2 Reference data & entity resolution (0.2.0): T2.1 ✅ · T2.2 ✅ · T2.3 ✅ · T2.4 ✅ · T2.5 ✅ · T2.6 ✅ · T2.7 ✅ · T2.8 ✅ · T2.9 ✅
 - [ ] M3 Event study (G1 kill test): T3.0 ⏳ (human) · T3.1 ⚠️ · T3.2 ✅ · T3.3 ✅ · T3.4 ✅ (code; real run ⏳ backfill) · T3.5 ⏳ (gate, after the real run)
-- [ ] M4 LLM extraction (infrastructure for ORDER_WIN; scope confirmed at G1): T4.1 ✅ · T4.2 ✅ · T4.3 ✅ · T4.4 · T4.5 · T4.6 · T4.7
+- [ ] M4 LLM extraction (infrastructure for ORDER_WIN; scope confirmed at G1): T4.1 ✅ · T4.2 ✅ · T4.3 ✅ · T4.4 ✅ · T4.5 · T4.6 · T4.7
 - [ ] M5 Intraday data & reaction curves (G1b)
 - [ ] M6 Backtester (G2)
 - [ ] M7 Paper trading (G3)
@@ -85,6 +85,17 @@ are PowerShell, run from `C:\Projects\GATS`.
 ## Log
 
 - **2026-10-03:**
+  - T4.4 done. `gats extract run --mode rules|llm|cascade`: Ollama `/api/chat` with a
+    JSON-schema `format` (temperature 0, seed 0). The model copies text; code derives the
+    numbers and rejects bad JSON, schema misses, amounts not in the filing and sub-lakh
+    amounts. Every call is logged in `llm_extractions` (the cache: document, prompt hash,
+    model; cached replies are re-validated). Real runs: 20 filings LLM-only, 20/20 valid
+    JSON, 18 s/call, one "400 MW" quoted as an amount and rejected. Cascade on 120: rules
+    settle 106, the LLM 14 (12 accepted). Comparing with the LLM exposed rules bugs, fixed
+    in order-rules-v4: label priority (Laser Power ₹72.77 cr total, not one ₹58.92 cr
+    contract), a ₹1-lakh floor (v1 called ₹1–₹217 order values in 13/400), amounts in
+    words (94/363 texts), split figures (KEC ₹1,303 cr, not ₹303 cr), ranges (lower
+    bound). Ollama 0.32.8 with qwen2.5-coder 7B/3B was already installed (the HUMAN step).
   - T4.3 done. `gats.extract.rules.extract_order_win`: SEBI annexure fields
     (label-to-label segments, PDF cell interleaving handled) or the order
     sentence of a covering letter; confidence 0.9 / 0.7 / 0.2 with `unsure`

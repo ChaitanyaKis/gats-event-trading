@@ -103,6 +103,8 @@ del .env                             # back to real endpoints
 | `gats refdata resolve nse_symbol ZOMATO --date 2024-08-01` | What an identifier meant on a date |
 | `gats events classify` / `gats events coverage` | Type filings with `configs/event_taxonomy.yaml`; report what stays OTHER |
 | `gats research event-study` | Run the pre-registered M3 study (refuses an edited config or incomplete data) |
+| `gats extract fetch --type ORDER_WIN` / `gats extract texts` / `gats extract coverage` | Download an event type's attachments (whatever the storage policy) and turn them into text |
+| `gats extract run --type ORDER_WIN --mode cascade [--limit N]` | Extract order value, counterparty, duration... (`rules`, `llm` or `cascade`; LLM modes need Ollama running) |
 | `gats inspect-bad [--limit N]` | Recent failed fetches and the payloads that failed to parse |
 | `gats version` | Installed version (check it after every update) |
 

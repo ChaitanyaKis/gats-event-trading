@@ -176,6 +176,12 @@ class Settings(BaseSettings):
     master_build_after_ist: time = time(9, 0)
     link_poll_s: float = Field(default=60.0, gt=0)
     extract_poll_s: float = Field(default=300.0, gt=0)  # attachment text extraction
+    # Local LLM (Ollama, verified 2026-10-03: POST /api/chat with a JSON-schema
+    # "format"). The model name must exist in `ollama list`.
+    ollama_url: str = "http://localhost:11434"
+    llm_model: str = "qwen2.5-coder:7b-instruct-q4_K_M"
+    llm_timeout_s: float = Field(default=300.0, gt=0)
+    llm_max_chars: int = Field(default=8000, ge=1000)  # facts sit in the first pages
     # Event taxonomy (versioned YAML, relative to the working directory).
     taxonomy_path: Path = Path("configs/event_taxonomy.yaml")
     classify_poll_s: float = Field(default=120.0, gt=0)

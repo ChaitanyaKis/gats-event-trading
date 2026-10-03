@@ -23,33 +23,55 @@ from dataclasses import dataclass
 from datetime import date
 
 from gats.extract.money import Money, find_amounts
-from gats.extract.schemas import OrderWin
+from gats.extract.schemas import MIN_ORDER_INR, OrderWin
 
-# Field labels of the SEBI annexure, as PDF text renders them.
-_LABELS: tuple[tuple[str, str], ...] = (
+# Bump on any rule change: stored extractions are keyed by it.
+# The human-readable part of the stored version; the cascade appends a hash
+# of the code, so every edit re-extracts anyway. Bump it for changes worth
+# naming. v4: label priority, fallback candidates, a 1-lakh floor, amounts
+# in words (v2 and v3 were development states, found only in a dev DB).
+RULES_VERSION = "order-rules-v4"
+
+# Field labels of the SEBI annexure, as PDF text renders them. Each field
+# lists its alternatives best first: the canonical SEBI wording wins over
+# looser phrases that also occur in prose ("Contract valued at ..." once
+# matched "contract value" ahead of the real "Broad consideration or size").
+_LABELS: tuple[tuple[str, tuple[str, ...]], ...] = (
     (
         "counterparty",
-        r"name of the (?:entity|party|customer|company|client)\s*(?:/\s*\w+\s*)?"
-        r"(?:awarding|from whom|who has (?:awarded|placed)|to whom)",
+        (
+            r"name of the (?:entity|party|customer|company|client)\s*(?:/\s*\w+\s*)?"
+            r"(?:awarding|from whom|who has (?:awarded|placed)|to whom)",
+        ),
     ),
-    ("terms", r"significant terms(?:\s+and\s+conditions)?"),
+    ("terms", (r"significant terms(?:\s+and\s+conditions)?",)),
     (
         "awarded_by",
-        r"whether (?:the )?order\s*\(\s*s\s*\)\s*/?\s*contract\s*\(\s*s\s*\)\s*"
-        r"(?:have|has) been\s+awarded by",
+        (
+            r"whether (?:the )?order\s*\(\s*s\s*\)\s*/?\s*contract\s*\(\s*s\s*\)\s*"
+            r"(?:have|has) been\s+awarded by",
+        ),
     ),
-    ("nature", r"nature of (?:the )?order"),
-    ("dom_intl", r"whether domestic or\s+internationa\s?l"),
-    ("period", r"time period"),
+    ("nature", (r"nature of (?:the )?order",)),
+    ("dom_intl", (r"whether domestic or\s+internationa\s?l",)),
+    ("period", (r"time period",)),
     (
         "size",
-        r"broad consideration or\s+size|size of (?:the )?order|value of (?:the )?order|"
-        r"order value|contract value",
+        (
+            r"broad consideration or\s+size",
+            r"\bsize of (?:the )?order",
+            r"\bvalue of (?:the )?order\b",
+            r"\border value\b",
+            r"\bcontract value\b",
+        ),
     ),
-    ("promoter", r"whether the\s+promoter"),
-    ("related", r"related party\s+transaction|fall within related party"),
+    ("promoter", (r"whether the\s+promoter",)),
+    ("related", (r"related party\s+transaction", r"fall within related party")),
 )
-_LABEL_RES = [(name, re.compile(pattern, re.IGNORECASE)) for name, pattern in _LABELS]
+_LABEL_RES = [
+    (name, [re.compile(p, re.IGNORECASE) for p in patterns]) for name, patterns in _LABELS
+]
+
 
 # Label text the PDF layout leaves inside values.
 _FRAGMENTS = re.compile(
@@ -91,18 +113,30 @@ class RuleResult:
     unsure: bool
 
 
-def _segments(text: str) -> dict[str, str]:
-    """Annexure field -> its value text (empty when the field is absent)."""
-    hits = []
-    for name, pattern in _LABEL_RES:
-        match = pattern.search(text)
-        if match:
-            hits.append((match.start(), match.end(), name))
-    hits.sort()
-    values: dict[str, str] = {}
-    for i, (_start, end, name) in enumerate(hits):
-        stop = hits[i + 1][0] if i + 1 < len(hits) else min(len(text), end + 400)
-        values[name] = _clean(text[end:stop])
+def _segments(text: str) -> dict[str, list[str]]:
+    """Annexure field -> candidate value texts, best label alternative first.
+
+    A value runs from its label to the next field's label. Only each field's
+    best alternative marks where values end; weaker alternatives still give
+    fallback candidates (at most 400 characters), for forms whose canonical
+    row is blank or garbled while a looser label holds the value.
+    """
+    found = {
+        name: [match for pattern in patterns if (match := pattern.search(text))]
+        for name, patterns in _LABEL_RES
+    }
+    starts = sorted(matches[0].start() for matches in found.values() if matches)
+    values: dict[str, list[str]] = {}
+    for name, matches in found.items():
+        candidates = []
+        for rank, match in enumerate(matches):
+            following = [s for s in starts if s > match.start()]
+            stop = following[0] if following else len(text)
+            if rank > 0 or not following:
+                stop = min(stop, match.end() + 400)
+            candidates.append(_clean(text[match.end() : stop]))
+        if candidates:
+            values[name] = candidates
     return values
 
 
@@ -123,8 +157,8 @@ def _counterparty(value: str) -> str | None:
 
 def _pick(amounts: list[Money]) -> Money | None:
     """Prefer a rupee amount (others cannot be compared with revenue)."""
-    rupees = [m for m in amounts if m.currency == "INR"]
-    chosen = rupees or amounts
+    rupees = [m for m in amounts if m.currency == "INR" and m.amount >= MIN_ORDER_INR]
+    chosen = rupees or [m for m in amounts if m.currency != "INR"]
     return chosen[0] if chosen else None
 
 
@@ -149,7 +183,61 @@ def _domestic_or_export(flat: str, fields: dict[str, str], amounts: list[Money])
     return "unknown"
 
 
-def _months(value: str, filed: date | None) -> float | None:
+_MONTHS = {
+    name: number
+    for number, names in enumerate(
+        [
+            ("january", "jan"),
+            ("february", "feb"),
+            ("march", "mar"),
+            ("april", "apr"),
+            ("may",),
+            ("june", "jun"),
+            ("july", "jul"),
+            ("august", "aug"),
+            ("september", "sep", "sept"),
+            ("october", "oct"),
+            ("november", "nov"),
+            ("december", "dec"),
+        ],
+        start=1,
+    )
+    for name in names
+}
+_DAY_MONTH_YEAR = re.compile(r"\b(\d{1,2})(?:st|nd|rd|th)?\s+([A-Za-z]{3,9})\.?,?\s+(\d{4})\b")
+_MONTH_DAY_YEAR = re.compile(r"\b([A-Za-z]{3,9})\.?\s+(\d{1,2})(?:st|nd|rd|th)?,?\s+(\d{4})\b")
+
+
+def _end_date(value: str) -> date | None:
+    """The first date in ``value``: 31.03.2027, 31/03/2027, 31st March 2027,
+    December 31, 2026."""
+    found = _DATE.search(value)
+    candidates: list[tuple[int, int, int]] = []
+    if found:
+        day, month, year = (int(g) for g in found.groups())
+        candidates.append((year, month, day))
+    for pattern, order in ((_DAY_MONTH_YEAR, "dmy"), (_MONTH_DAY_YEAR, "mdy")):
+        match = pattern.search(value)
+        if match:
+            a, b, year_text = match.groups()
+            name, day_text = (b, a) if order == "dmy" else (a, b)
+            month_number = _MONTHS.get(name.lower())
+            if month_number:
+                candidates.append((int(year_text), month_number, int(day_text)))
+    for year, month, day in candidates:
+        try:
+            return date(year, month, day)
+        except ValueError:
+            continue
+    return None
+
+
+def duration_months(value: str | None, filed: date | None) -> float | None:
+    """Months from "18 months", "2 years", "70 days", or until an end date
+    ("Up to 31.03.2027", "on or before December 31, 2026") counted from the
+    filing date. None when nothing plausible (0-50 years) is found."""
+    if not value:
+        return None
     match = _DURATION.search(value)
     if match:
         n, unit = float(match.group(1)), match.group(2).lower()
@@ -162,13 +250,8 @@ def _months(value: str, filed: date | None) -> float | None:
         else:
             months = n
         return months if 0 < months <= 600 else None
-    found = _DATE.search(value)
-    if found and filed is not None:
-        day, month, year = (int(g) for g in found.groups())
-        try:
-            end = date(year, month, day)
-        except ValueError:
-            return None
+    end = _end_date(value)
+    if end is not None and filed is not None:
         months = (end - filed).days / 30.4
         return round(months, 1) if 0 < months <= 600 else None
     return None
@@ -193,17 +276,22 @@ def extract_order_win(text: str, filed: date | None = None) -> RuleResult:
     """Order-win facts from attachment text. ``filed`` (the filing date)
     turns "to be executed by 31.03.2027" into months."""
     flat = " ".join(text.split())
-    fields = _segments(flat)
+    candidates = _segments(flat)
+    fields = {name: values[0] for name, values in candidates.items()}
     repeat = bool(re.search(r"\brepeat order", flat, re.IGNORECASE)) or None
     domestic = _domestic_or_export(flat, fields, find_amounts(flat))
     counterparty = _counterparty(fields["counterparty"]) if "counterparty" in fields else None
-    duration = _months(fields.get("period", ""), filed)
+    duration = duration_months(fields.get("period", ""), filed)
 
-    size = fields.get("size", "")
-    money = _pick(find_amounts(size)) if size else None
-    evidence: str | None
+    money: Money | None = None
+    evidence: str | None = None
+    for size in candidates.get("size", []):
+        money = _pick(find_amounts(size))
+        if money is not None:
+            evidence = size[:1000]
+            break
     if money is not None:
-        method, confidence, evidence = "annexure", 0.9, size[:1000]
+        method, confidence = "annexure", 0.9
     else:
         money, evidence = _sentence_amount(flat)
         method, confidence = ("sentence", 0.7) if money else ("none", 0.2)

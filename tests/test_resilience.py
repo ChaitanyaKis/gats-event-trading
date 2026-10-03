@@ -9,7 +9,7 @@ from pathlib import Path
 import httpx
 import pytest
 import respx
-from sqlalchemy import select, text
+from sqlalchemy import inspect, select, text
 
 from gats.db import repo
 from gats.db.engine import SchemaVersionError, init_db, make_engine
@@ -332,6 +332,23 @@ class TestSchemaUpgrade:
         assert rows[("BSE", "2026-09-22")][0] == "complete"
         assert rows[("BSE", "2026-09-23")][0] == "complete"
         assert rows[("NSE", "2026-09-21")][0] == "complete"
+        engine.dispose()
+
+    def test_v5_database_gains_the_m3_m4_tables(self, tmp_path: Path) -> None:
+        added = {"announcement_event_types", "document_texts", "llm_extractions", "extractions"}
+        engine = make_engine(f"sqlite:///{tmp_path / 'v5.db'}")
+        metadata.create_all(
+            engine, tables=[t for name, t in metadata.tables.items() if name not in added]
+        )
+        with engine.begin() as conn:
+            conn.execute(text("INSERT INTO schema_meta VALUES ('schema_version', '5')"))
+        init_db(engine)
+        with engine.begin() as conn:
+            version = conn.execute(
+                text("SELECT value FROM schema_meta WHERE key='schema_version'")
+            ).scalar_one()
+        assert version == str(SCHEMA_VERSION) == "6"
+        assert added <= set(inspect(engine).get_table_names())
         engine.dispose()
 
     def test_newer_database_is_refused(self, tmp_path: Path) -> None:

@@ -51,6 +51,8 @@ REAL_PHRASINGS: list[tuple[str, float, str | None]] = [
     ("Rs. 63,15,14,433", 631_514_433, "INR"),
     ("19, CR", 190_000_000, "INR"),  # a table cell split by the PDF layout
     ("Rupees 450 Crore", 4_500_000_000, "INR"),
+    ("Rs. 1, 303 Crores", 13_030_000_000, "INR"),  # KEC, 2026-09-14: a space after the comma
+    ("in the range of Rs.10-17 crores", 100_000_000, "INR"),  # a range: its lower bound
 ]
 
 
@@ -73,6 +75,11 @@ def test_at_least_thirty_real_phrasings() -> None:
 )
 def test_non_amounts(text: str) -> None:
     assert parse_amount(text) is None
+
+
+def test_a_list_is_not_one_split_number() -> None:
+    found = find_amounts("orders of Rs. 100, 200 and 300 crore")
+    assert [m.amount for m in found] == [100, 3_000_000_000]
 
 
 def test_amounts_in_a_sentence() -> None:
@@ -112,3 +119,74 @@ class TestOrderWin:
     def test_json_schema_for_constrained_generation(self) -> None:
         schema = OrderWin.model_json_schema()
         assert "amount_text" in schema["properties"] and schema["additionalProperties"] is False
+
+
+# Amounts in words, verbatim from real order-win texts (2026-09).
+REAL_WORDS: list[tuple[str, float | None]] = [
+    ("(Rupees One Crore Sixty-Four Lakh Ninety-Nine Thousand Seven Hundred Four only)", 16_499_704),
+    (
+        "(Rupees Eighteen Crore Forty -Two Lakh Six Thousand One Hundred Seventy -Six Only)",
+        184_206_176,
+    ),
+    # a word split by the PDF layout
+    ("(Rupees Two Crore Eighteen Lakhs Ninety-four Thousand Nine Hundre d Only)", 21_894_900),
+    (
+        "(Rupees One Hundred and Seventeen Crore Ninety Nine Lakh Seventy One Thousand Five "
+        "Hundred and Sixty Four and Paise Ninety Only)",
+        1_179_971_564.90,
+    ),
+    (
+        "(Rupees Eighty-Three Lakh Five Thousand One Hundred Fifty-Three and Eighty-Seven "
+        "paise only)",
+        8_305_153.87,
+    ),
+    (
+        "(Rupees Four Hundred And Four Crore Eighty-Eight Lakh Eighteen Thousand Seven Hundred "
+        "And Thirty-Eight Rupees Only)",
+        4_048_818_738,
+    ),
+    (
+        "(Rupees Thirty Million Two Hundred Ninety Thousand and Two Hundred Seventy-One Only)",
+        30_290_271,
+    ),
+    (
+        "(Rupees Twenty Eight Crores Seventeen Lakhs Forty Two Thousand Three Hundred Eighty "
+        "Two and Twenty Paise Only)",
+        281_742_382.20,
+    ),
+    ("(Rupees Six Hundred & Sixty Crore and Seventy -Nine lakhs only)", 6_607_900_000),
+    ("Rupees Fifty-Two Crore and fifty-five lakh only", 525_500_000),
+    # a typo in the filing itself: unreadable, never guessed
+    (
+        "(Rupees Four Crore Fifteen Lakh Thifty-One Thousand Eight Hundred Seventeen and Paise "
+        "Sixty Only)",
+        None,
+    ),
+]
+
+
+@pytest.mark.parametrize(("text", "amount"), REAL_WORDS)
+def test_real_amounts_in_words(text: str, amount: float | None) -> None:
+    money = parse_amount(text)
+    if amount is None:
+        assert money is None
+    else:
+        assert money is not None and money.currency == "INR"
+        assert money.amount == pytest.approx(amount)
+
+
+def test_words_rescue_a_figure_without_its_unit() -> None:
+    # HEG Advanced Materials, 2026-09-18: "Crore" is missing after the figure (the
+    # company later filed a corrigendum); the words carry it.
+    found = find_amounts("Rs. 217.56 (Rupees Two Hundred Seventeen Crore Fifty Six Lakh only)")
+    assert [m.amount for m in found] == [217.56, 2_175_600_000]
+
+
+def test_scales_multiply_what_came_before() -> None:
+    money = parse_amount("Rupees One Lakh Twenty Thousand Crore only")  # 1.2 lakh crore
+    assert money is not None and money.amount == 1.2e12
+
+
+@pytest.mark.parametrize("text", ["Rupees in Crores only", "Rs. Lakh only", "INR only"])
+def test_words_that_are_not_amounts(text: str) -> None:
+    assert parse_amount(text) is None

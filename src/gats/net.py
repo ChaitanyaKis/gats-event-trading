@@ -19,6 +19,7 @@ from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from email.utils import parsedate_to_datetime
+from typing import Any
 from urllib.parse import urlsplit
 
 import httpx
@@ -181,6 +182,23 @@ class PoliteClient:
             fetched = await self._request(url, params=params, headers=headers, max_bytes=max_bytes)
         return fetched
 
+    async def post_json(
+        self,
+        url: str,
+        payload: Mapping[str, Any],
+        *,
+        timeout_s: float | None = None,
+        headers: Mapping[str, str] | None = None,
+    ) -> Fetched:
+        """POST a JSON body with the same throttle, retries and backoff as GET.
+
+        Used for local services (the Ollama API), which need POST and much
+        longer timeouts than exchange pages.
+        """
+        return await self._request(
+            url, params=None, headers=headers, method="POST", json_body=payload, timeout_s=timeout_s
+        )
+
     async def _request(
         self,
         url: str,
@@ -188,6 +206,9 @@ class PoliteClient:
         params: Mapping[str, str] | None,
         headers: Mapping[str, str] | None,
         max_bytes: int | None = None,
+        method: str = "GET",
+        json_body: Mapping[str, Any] | None = None,
+        timeout_s: float | None = None,
     ) -> Fetched:
         host = urlsplit(url).netloc
         last_error: str = "no attempt made"
@@ -198,7 +219,12 @@ class PoliteClient:
             fetched_at = utcnow()
             try:
                 async with self._client.stream(
-                    "GET", url, params=params, headers=headers
+                    method,
+                    url,
+                    params=params,
+                    headers=headers,
+                    json=json_body,
+                    timeout=timeout_s if timeout_s is not None else httpx.USE_CLIENT_DEFAULT,
                 ) as response:
                     if response.status_code in _RETRY_STATUSES:
                         last_error = f"HTTP {response.status_code}"

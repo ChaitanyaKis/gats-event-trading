@@ -50,6 +50,11 @@ def _v4_to_v5(conn: Connection) -> None:
     _add_column_if_missing(conn, "announcements", "attachment_size", "BIGINT")
 
 
+def _v5_to_v6(conn: Connection) -> None:
+    """v6 only added tables (event types, attachment texts, LLM calls,
+    extracted facts), which create_all() has made."""
+
+
 # Upgrade steps keyed by the version they start from. Each must be additive
 # and safe to run on a database that create_all() has just touched.
 _UPGRADES: dict[int, Callable[[Connection], None]] = {
@@ -57,6 +62,7 @@ _UPGRADES: dict[int, Callable[[Connection], None]] = {
     2: _v2_to_v3,
     3: _v3_to_v4,
     4: _v4_to_v5,
+    5: _v5_to_v6,
 }
 
 

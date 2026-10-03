@@ -35,7 +35,7 @@ from sqlalchemy import (
 
 from gats.db.types import UTCDateTime
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 metadata = MetaData(
     naming_convention={
@@ -464,4 +464,38 @@ document_texts = Table(
     Column("error", Text),
     Column("text", Text, nullable=False),
     Column("extracted_at", UTCDateTime, nullable=False),
+)
+
+# Every LLM call (T4.4): the cache, keyed by what determines the answer, and
+# the log of how often the model fails validation.
+llm_extractions = Table(
+    "llm_extractions",
+    metadata,
+    Column("doc_id", String(64), ForeignKey("raw_documents.doc_id"), primary_key=True),
+    Column("event_type", String(32), primary_key=True),
+    Column("prompt_hash", String(16), primary_key=True),
+    Column("model", String(128), primary_key=True),
+    Column("status", String(24), nullable=False),  # ok | invalid_json | invalid_schema | ...
+    Column("output", JSON),  # the validated OrderWin, when ok
+    Column("raw", Text),  # the model's message, kept for failures too
+    Column("error", Text),
+    Column("latency_ms", Integer),
+    Column("prompt_tokens", Integer),
+    Column("output_tokens", Integer),
+    Column("created_at", UTCDateTime, nullable=False),
+)
+
+# Final extracted facts per filing and extractor version (rules/LLM/cascade).
+extractions = Table(
+    "extractions",
+    metadata,
+    Column("announcement_id", Integer, ForeignKey("announcements.id"), primary_key=True),
+    Column("extractor_version", String(160), primary_key=True),
+    Column("event_type", String(32), nullable=False),
+    Column("method", String(32), nullable=False),  # rules_annexure | rules_sentence | llm | ...
+    Column("fields", JSON),
+    Column("amount_inr", Float),
+    Column("confidence", Float, nullable=False),
+    Column("created_at", UTCDateTime, nullable=False),
+    Index(None, "extractor_version", "event_type"),
 )

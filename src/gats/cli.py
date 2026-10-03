@@ -1136,3 +1136,44 @@ def extract_coverage(
         f"text {cov.with_text} ({cov.share:.1%}), needs OCR {cov.needs_ocr}, errors {cov.errors}"
     )
     typer.echo(f"  attachment status: {cov.by_status}")
+
+
+@extract_app.command("run")
+def extract_run(
+    event_type: Annotated[
+        str, typer.Option("--type", help="Event type (ORDER_WIN).")
+    ] = "ORDER_WIN",
+    mode: Annotated[str, typer.Option(help="rules | llm | cascade")] = "cascade",
+    limit: Annotated[int, typer.Option(help="Most filings in this run.")] = 50,
+) -> None:
+    """Extract facts (amount, counterparty, ...) from filings' attachment text."""
+    from gats.extract.cascade import run_extractions
+
+    if mode not in ("rules", "llm", "cascade"):
+        raise typer.BadParameter("mode must be rules, llm or cascade")
+    settings = _settings()
+    tax = _taxonomy(settings)
+
+    async def main() -> Any:
+        async with _services(settings) as svc:
+            return await run_extractions(
+                svc,
+                event_type=event_type,
+                taxonomy_version=tax.version,
+                mode=mode,  # type: ignore[arg-type]
+                limit=limit,
+            )
+
+    stats = asyncio.run(main())
+    typer.echo(f"{stats.version}: {stats.filings} filings {dict(stats.by_method)}")
+    if stats.llm_calls or stats.llm_cached:
+        mean = stats.llm_ms / stats.llm_calls / 1000 if stats.llm_calls else 0.0
+        typer.echo(
+            f"  LLM: {stats.llm_calls} calls (mean {mean:.1f} s), {stats.llm_cached} cached, "
+            f"status {dict(stats.llm_status)}"
+        )
+    if stats.deferred:
+        typer.echo(f"  {stats.deferred} filings left pending (no LLM answer)")
+    if stats.stopped:
+        typer.echo(f"  stopped early: {stats.stopped}", err=True)
+        raise typer.Exit(1)

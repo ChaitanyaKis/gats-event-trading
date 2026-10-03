@@ -23,4 +23,4 @@ exchange data only; nothing personal.
 | `nse_asm_2026-10-03.json` | `www.nseindia.com/api/reportASM` | 2026-10-03 | 9 of 126 long-term entries (all stages) and 5 of 68 short-term |
 | `nse_gsm_2026-10-03.json` | `www.nseindia.com/api/reportGSM` | 2026-10-03 | 8 of 77 entries, incl. stages `0` and `LXII` |
 | `order_win_attachment.pdf` | Goldiam International order-win attachment (the same file on NSE and BSE), via `gats extract fetch` | 2026-10-03 | unchanged, 180 KB, 2 pages |
-| `order_win_texts.json` | text of 5 real order-win attachments (HEC Infra, Ceinsys, NBCC, Veerhealth, Goldiam), extracted with pypdf | 2026-10-03 | whitespace-normalised full text |
+| `order_win_texts.json` | text of 9 real order-win attachments (HEC Infra, Ceinsys, NBCC, Veerhealth, Goldiam; T4.4 regressions: Laser Power, BCPL, HEG Advanced Materials, Vascon), extracted with pypdf | 2026-10-03 | whitespace-normalised full text |

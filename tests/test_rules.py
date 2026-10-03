@@ -31,9 +31,44 @@ EXPECTED = {
         600_000_000,
         "International USA clients",
         "export",
-        None,
+        3.5,  # "on or before December 31, 2026", from the filing date
     ),
 }
+
+
+# Found by comparing the rules with the LLM in T4.4; verified by hand.
+REGRESSIONS = {
+    # "a Supply of Goods Contract valued at approximately Rs 58.92 crores" is one of two
+    # contracts; "Broad consideration or size" holds the total
+    "Laser Power & Infra Limited": 727_700_000,
+    # the "Broad consideration" row holds tender text and "Value of the order(s)" the
+    # amount; a signature stamp "RS20" is no order value
+    "BCPL Railway Infrastructure Limited": 58_900_000,
+    # "Rs. 217.56" without its unit; the amount in words says crore
+    "HEG Advanced Materials Limited": 2_175_600_000,
+    # the PDF splits the figure ("Rs. 6 60.79/-"); the words are intact
+    "Vascon Engineers Ltd": 6_607_900_000,
+}
+
+
+@pytest.mark.parametrize("company", sorted(REGRESSIONS))
+def test_real_regressions(company: str) -> None:
+    result = extract_order_win(TEXTS[company], filed=FILED)
+    assert result.method == "annexure" and not result.unsure
+    assert result.order.amount_inr == pytest.approx(REGRESSIONS[company])
+
+
+def test_canonical_label_beats_prose() -> None:
+    result = extract_order_win(TEXTS["Laser Power & Infra Limited"], filed=FILED)
+    assert result.order.counterparty == "Power Grid Corporation of India Limited"
+    assert result.order.evidence_span and "72.77" in result.order.evidence_span
+
+
+def test_stamp_sized_amounts_are_not_order_values() -> None:
+    result = extract_order_win(
+        "The Company has received an order from XYZ Ltd, signed RS20 Company Secretary"
+    )
+    assert result.method == "none" and result.order.amount is None
 
 
 @pytest.mark.parametrize("company", sorted(EXPECTED))
