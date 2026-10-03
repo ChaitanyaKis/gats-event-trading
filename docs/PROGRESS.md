@@ -5,7 +5,7 @@ Claude Code updates this after every task. Newest log entry first.
 ## Status
 
 - **Version:** 0.2.0 · **Schema:** v5 · **Milestone:** M3 (M1 waits only on T1.6, HUMAN)
-- **Next up:** T3.0 Backfill plan [ASK] (plan → Waiting on the human), then T3.1 Event taxonomy
+- **Next up:** T3.1 Event taxonomy (T3.0 plan is waiting for the human: item 3)
 
 ## Waiting on the human (HUMAN)
 
@@ -24,7 +24,37 @@ are PowerShell, run from `C:\Projects\GATS`.
    ```
    Then send back the CI run URL (or type `/gats`; Claude checks `gh run list`).
 
-3. **Optional (T2.5):** spot-check a few of the 50 pairs in
+3. **T3.0 Backfill plan [ASK] — approve by running it.** Range
+   2019-10-01 → 2026-10-02 (EOD prices start 2019-10-01). Estimates use rates
+   measured on 2026-10-03: NSE archives 1.0 s/request, NSE announcements
+   1.6 s/day, BSE 3.95 s/page at 4 s spacing (~25 pages/day). Disk: ~4 GB for
+   phase A, ~10 GB with BSE; 82 GB free.
+
+   **Phase A (recommended, ~2.5 h, fine while the recorder runs).** Run in a
+   second terminal, one after another; each is resumable (rerun to continue):
+   ```powershell
+   cd C:\Projects\GATS
+   .venv\Scripts\gats backfill eod --start 2019-10-01 --end 2026-10-02          # ~42 min
+   .venv\Scripts\gats backfill indices --start 2019-10-01 --end 2026-10-02      # ~37 min
+   .venv\Scripts\gats backfill announcements --source nse --start 2019-10-01 --end 2026-10-02   # ~70 min
+   .venv\Scripts\gats refdata build        # links the new filings
+   .venv\Scripts\gats refdata dedupe
+   .venv\Scripts\gats status               # check 'backfill days' and health
+   ```
+   **Phase B (optional, BSE, ~10 h per year with the recorder running).** The
+   M3 study prices on NSE, so NSE filings suffice; BSE adds earlier
+   timestamps (minutes) and BSE-only companies (not priced in M3). If wanted,
+   one year per night, newest first:
+   ```powershell
+   $env:GATS_HOST_MIN_INTERVAL_S='{"api.bseindia.com": 4}'
+   .venv\Scripts\gats backfill announcements --source bse --start 2025-10-01 --end 2026-08-31
+   .venv\Scripts\gats backfill announcements --source bse --start 2024-10-01 --end 2025-09-30
+   # ... and so on back to 2019-10-01; then: gats refdata build; gats refdata dedupe
+   ```
+   Then type `/gats`: Claude checks completeness (≥ 98% of days `complete`,
+   gaps listed) and runs the pre-registered M3 study (T3.4 → G1).
+
+4. **Optional (T2.5):** spot-check a few of the 50 pairs in
    `docs/research/dedupe_v1_review.md` (each shows both exchanges' text) and
    tell Claude if any verdict looks wrong.
 
@@ -37,7 +67,7 @@ are PowerShell, run from `C:\Projects\GATS`.
 - [x] M1 core recorder (0.1.0 → 0.1.2)
 - [ ] M1 finishing: T1.1 ✅ · T1.2 ✅ · T1.3 ✅ · T1.4 ✅ · T1.5 ✅ · T1.6
 - [x] M2 Reference data & entity resolution (0.2.0): T2.1 ✅ · T2.2 ✅ · T2.3 ✅ · T2.4 ✅ · T2.5 ✅ · T2.6 ✅ · T2.7 ✅ · T2.8 ✅ · T2.9 ✅
-- [ ] M3 Event study (G1 kill test)
+- [ ] M3 Event study (G1 kill test): T3.0 ⏳ (human) · T3.1 · T3.2 · T3.3 · T3.4 · T3.5
 - [ ] M4 LLM extraction
 - [ ] M5 Intraday data & reaction curves (G1b)
 - [ ] M6 Backtester (G2)
@@ -55,6 +85,10 @@ are PowerShell, run from `C:\Projects\GATS`.
 ## Log
 
 - **2026-10-03:**
+  - T3.0 plan written (Waiting on the human, item 3), with measured rates:
+    phase A (EOD, indices, NSE filings) ~2.5 h; BSE optional (~10 h/year).
+    Decision: M3 uses NSE availability times only, which can only delay
+    entries (never look ahead); BSE is an optional extension.
   - **M2 wrap-up:** version 0.2.0 (schema v5), README updated,
     `docs/learning/M1.md` and `docs/learning/M2.md` written.
   - T2.9 done. NSE ASM (long/short term) and GSM APIs verified; versioned in
