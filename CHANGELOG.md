@@ -10,6 +10,9 @@ Schema v9 (new tables only), upgraded automatically.
   `gats bars show` summarises a day, and `gats probe upstox-candles`
   checks a day's bars against NSE's end-of-day file. New optional
   dependency (extra `research`): duckdb.
+- **Order-magnitude study:** `gats research magnitude` runs the pre-registered
+  T4.7 re-test (order wins worth at least 10% of trailing revenue) and writes
+  `reports/M4_magnitude.md`.
 - **Company revenue:** `gats backfill results --type ORDER_WIN` stores NSE's
   quarterly results filings (both the legacy and the integrated-filing
   index) and reads each quarter's revenue from its XBRL. Trailing revenue is

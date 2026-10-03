@@ -5,7 +5,7 @@ Claude Code updates this after every task. Newest log entry first.
 ## Status
 
 - **Version:** 0.2.0 · **Schema:** v9 · **Milestone:** M3 (M1 waits only on T1.6, HUMAN)
-- **Next up:** T4.7 pre-registration of the magnitude re-test, then the M7 paper runtime and learning notes. T5.3 waits for live latency (recorder, item 1). Waiting on the human: recorder (1), M3 run (3), labels (5), Upstox token (6)
+- **Next up:** M7 T7.1 paper runtime (live quotes need the Upstox token, item 6), then learning notes for the code-complete milestones. T5.3 waits for live latency (recorder, item 1). Waiting on the human: recorder (1), M3 run (3), labels (5), Upstox token (6)
 
 ## Waiting on the human (HUMAN)
 
@@ -106,7 +106,7 @@ are PowerShell, run from `C:\Projects\GATS`.
 - [ ] M1 finishing: T1.1 ✅ · T1.2 ✅ · T1.3 ✅ · T1.4 ✅ · T1.5 ✅ · T1.6
 - [x] M2 Reference data & entity resolution (0.2.0): T2.1 ✅ · T2.2 ✅ · T2.3 ✅ · T2.4 ✅ · T2.5 ✅ · T2.6 ✅ · T2.7 ✅ · T2.8 ✅ · T2.9 ✅
 - [ ] M3 Event study (G1 kill test): T3.0 ⏳ (human) · T3.1 ⚠️ · T3.2 ✅ · T3.3 ✅ · T3.4 ✅ (code; real run ⏳ backfill) · T3.5 ⏳ (gate, after the real run)
-- [ ] M4 LLM extraction (infrastructure for ORDER_WIN; scope confirmed at G1): T4.1 ✅ · T4.2 ✅ · T4.3 ✅ · T4.4 ✅ · T4.5 ⏳ (code ✅; labels: human) · T4.6 ⏳ (code ✅; needs the labels) · T4.7 ⏳ (revenue feature ✅; results backfill: human, item 7; re-test needs G1)
+- [ ] M4 LLM extraction (infrastructure for ORDER_WIN; scope confirmed at G1): T4.1 ✅ · T4.2 ✅ · T4.3 ✅ · T4.4 ✅ · T4.5 ⏳ (code ✅; labels: human) · T4.6 ⏳ (code ✅; needs the labels) · T4.7 ⏳ (pre-registered; code ✅; the run needs items 3, 5 and 7)
 - [ ] M5 Intraday data & reaction curves (G1b): T5.1 ⏳ (code ✅; token: human, item 6) · T5.2 ⏳ (code ✅; the fetch needs the token) · T5.3 ⏳ (pre-registered; code ✅; the run needs bars and recorder latency) · T5.4 ⏳ (gate)
 - [ ] M6 Backtester (G2): T6.1 ⏳ (model ✅; broker-calculator check needs the token, item 6) · T6.2 ✅ · T6.3 ✅ · T6.4 ✅ · T6.5 ✅ · T6.6 ✅ · T6.7 ✅ · T6.8 ⏳ (code ✅; the G2 run needs bars, events and T4.7's revenue feature)
 - [ ] M7 Paper trading (G3)
@@ -123,6 +123,12 @@ are PowerShell, run from `C:\Projects\GATS`.
 ## Log
 
 - **2026-10-03:**
+  - T4.7 pre-registered and coded (`docs/research/M4_prereg.md`, hash pinned, committed
+    before any return for order wins existed). M3's study with one registered filter:
+    order value / trailing revenue >= 10%, both as of the filing; 1%, 5%, 20% reported
+    only. It reads M3's test period a second time, so BH runs at q = 0.025. `gats research
+    magnitude` refuses an edited config, incomplete data, or a missing T4.6 evaluation
+    (the report quotes the measured extraction accuracy).
   - T4.7 revenue feature done (the backfill is the human's, item 7). `financial_results`
     (schema v9): one row per results filing with its dissemination time; `gats backfill
     results` stores both indexes and reads each quarter's revenue from XBRL only when the

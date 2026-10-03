@@ -264,13 +264,14 @@ class AsOf:
         return frozenset(flags)
 
     def extracted_facts(
-        self, announcement_ids: Collection[int], version_prefix: str
+        self, announcement_ids: Collection[int] | None, version_prefix: str
     ) -> dict[int, dict[str, Any]]:
-        """Facts extracted from each filing's own text, from its newest
-        extraction whose version starts with ``version_prefix``. They are
-        functions of the filing alone, so they were knowable when it was."""
+        """Facts extracted from each filing's own text (all filings when
+        ``announcement_ids`` is None), from its newest extraction whose
+        version starts with ``version_prefix``. They are functions of the
+        filing alone, so they were knowable when it was."""
         facts: dict[int, dict[str, Any]] = {}
-        wanted = set(announcement_ids)
+        wanted = None if announcement_ids is None else set(announcement_ids)
         rows = self._conn.execute(
             select(extractions.c.announcement_id, extractions.c.fields)
             .join(announcements, announcements.c.id == extractions.c.announcement_id)
@@ -281,7 +282,7 @@ class AsOf:
             .order_by(extractions.c.created_at)
         )
         for announcement_id, fields in rows:
-            if announcement_id in wanted and fields:
+            if (wanted is None or announcement_id in wanted) and fields:
                 facts[announcement_id] = dict(fields)
         return facts
 

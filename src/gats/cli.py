@@ -2155,3 +2155,99 @@ def research_reaction(
     passed = [f"{c.event_type}/{c.exit}" for c in family if c.passes]
     typer.echo(f"run {run_id}: {len(rows)} events -> {out / 'events.parquet'}")
     typer.echo(f"G1b: {'PASS ' + ', '.join(passed) if passed else 'nothing passes'} -> {report}")
+
+
+@research_app.command("magnitude")
+def research_magnitude(
+    config: Annotated[Path, typer.Option(help="Study config (YAML).")] = Path(
+        "configs/studies/m4_magnitude.yaml"
+    ),
+    prereg: Annotated[
+        Path, typer.Option(help="Pre-registration recording the config's hash.")
+    ] = Path("docs/research/M4_prereg.md"),
+    labels_path: LabelsPath = _LABELS,
+    report: Annotated[Path, typer.Option(help="Where to write the report.")] = Path(
+        "reports/M4_magnitude.md"
+    ),
+) -> None:
+    """Run the pre-registered order-magnitude study (T4.7).
+
+    Refuses an edited config, incomplete data, or a missing extraction
+    evaluation (the report must quote the measured accuracy).
+    """
+    from gats.extract.labels import TARGET_LABELS, load_labels
+    from gats.research.event_study import run_event_study, to_records, write_parquet
+    from gats.research.magnitude import build_magnitude_report, size_filter, verify_magnitude
+    from gats.research.registry import experiment
+    from gats.research.runs import data_readiness, stamp
+    from gats.research.study import RegistrationError
+
+    settings = _settings()
+    try:
+        cfg, digest = verify_magnitude(config, prereg)
+    except RegistrationError as exc:
+        typer.echo(f"REFUSED: {exc}")
+        raise typer.Exit(1) from exc
+    labelled = sum(r.get("status") == "labelled" for r in load_labels(labels_path).values())
+    evaluation = Path("reports/M4_extraction.md")
+    if labelled < TARGET_LABELS or not evaluation.exists():
+        has_report = "a" if evaluation.exists() else "no"
+        typer.echo(
+            f"NOT READY: the extraction evaluation (T4.6) needs {TARGET_LABELS} labels and its "
+            f"report; there are {labelled} labels and {has_report} report."
+        )
+        raise typer.Exit(1)
+    accuracy_note = next(
+        (
+            line.strip("| ").replace(" | ", ", ")
+            for line in evaluation.read_text(encoding="utf-8").splitlines()
+            if line.startswith("| cascade |")
+        ),
+        "see reports/M4_extraction.md",
+    )
+    db = make_engine(settings.resolved_db_url)
+    init_db(db)
+    exits = [x.name for x in cfg.exits]
+    with db.begin() as conn:
+        clock = AsOf(conn, utcnow())
+        readiness = data_readiness(conn, cfg, clock.calendar())
+        if not readiness.ready:
+            typer.echo("NOT READY: " + "; ".join(readiness.problems()))
+            raise typer.Exit(1)
+        registered = experiment(
+            db,
+            kind="event_study",
+            name=cfg.study,
+            params_hash=digest,
+            params={"config": config.as_posix(), "threshold": cfg.magnitude.min_amount_vs_revenue},
+            data_start=cfg.data.start,
+            data_end=cfg.data.end,
+            holdout=True,  # the second read of M3's test period
+        )
+        with registered as run:
+            rows = to_records(run_event_study(clock, cfg, size_filter(clock, cfg)), exits)
+            exploratory = {
+                threshold: to_records(
+                    run_event_study(clock, cfg, size_filter(clock, cfg, threshold)), exits
+                )
+                for threshold in cfg.magnitude.exploratory_thresholds
+            }
+            run.metrics = {"events": len(rows)}
+    db.dispose()
+    run_id = stamp()
+    out = settings.data_dir / "research" / cfg.study / run_id
+    write_parquet(rows, out / "events.parquet")
+    text, family = build_magnitude_report(
+        rows,
+        exploratory,
+        cfg,
+        digest=digest,
+        run_id=run_id,
+        experiment_id=run.id,
+        accuracy_note=accuracy_note,
+    )
+    report.parent.mkdir(parents=True, exist_ok=True)
+    report.write_text(text, encoding="utf-8", newline="\n")
+    passed = [c.exit for c in family if c.passes]
+    typer.echo(f"run {run_id}: {len(rows)} events -> {out / 'events.parquet'}")
+    typer.echo(f"result: {'PASS at ' + ', '.join(passed) if passed else 'no pass'} -> {report}")

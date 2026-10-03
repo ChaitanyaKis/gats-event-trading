@@ -107,6 +107,7 @@ del .env                             # back to real endpoints
 | `gats refdata coverage [--days N]` | Share of recent filings linked to a security; lists what is not |
 | `gats refdata resolve nse_symbol ZOMATO --date 2024-08-01` | What an identifier meant on a date |
 | `gats events classify` / `gats events coverage` | Type filings with `configs/event_taxonomy.yaml`; report what stays OTHER |
+| `gats research magnitude` | Run the pre-registered order-magnitude study (T4.7); needs the labels' evaluation and the results backfill |
 | `gats research reaction --scope ORDER_WIN` | Run the pre-registered M5 intraday reaction study (gate G1b); needs bars and live latency measurements |
 | `gats research event-study` | Run the pre-registered M3 study (refuses an edited config or incomplete data) |
 | `gats extract fetch --type ORDER_WIN` / `gats extract texts` / `gats extract coverage` | Download an event type's attachments (whatever the storage policy) and turn them into text |

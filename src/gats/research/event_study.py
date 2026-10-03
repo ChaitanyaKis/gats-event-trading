@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import statistics
 from collections import defaultdict
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import asdict, dataclass, field
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -107,8 +107,14 @@ def _bars(
     return bars
 
 
-def run_event_study(clock: AsOf, cfg: StudyConfig) -> list[EventResult]:
-    """Build every event with its filter reason and returns."""
+def run_event_study(
+    clock: AsOf,
+    cfg: StudyConfig,
+    keep: Callable[[Any, datetime], str | None] | None = None,
+) -> list[EventResult]:
+    """Build every event with its filter reason and returns. ``keep`` is an
+    extra pre-registered filter: given a filing and its availability, it
+    returns None to keep it or the reason it is dropped (before pricing)."""
     cal = clock.calendar()
     adjuster = clock.return_adjuster()
     resolver = clock.resolver()
@@ -143,6 +149,9 @@ def run_event_study(clock: AsOf, cfg: StudyConfig) -> list[EventResult]:
             continue
         if row.security_id is None:
             event.filter_reason = "unlinked"
+            continue
+        if keep is not None and (reason := keep(row, event.available_at)) is not None:
+            event.filter_reason = reason
             continue
         by_security[row.security_id].append(event)
 
