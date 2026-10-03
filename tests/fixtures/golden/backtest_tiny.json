@@ -1,0 +1,87 @@
+{
+ "executions": [
+  {
+   "order_id": 1,
+   "instrument_key": "NSE_EQ|INE000000A01",
+   "side": "buy",
+   "product": "intraday",
+   "quantity": 993,
+   "price": 100.67527394999999,
+   "at": "2026-07-14 04:36:00+00:00",
+   "reason": "order_win_drift: order win #1",
+   "charges": 30.3206
+  },
+  {
+   "order_id": 2,
+   "instrument_key": "NSE_EQ|INE000000A01",
+   "side": "sell",
+   "product": "intraday",
+   "quantity": 993,
+   "price": 106.620161725,
+   "at": "2026-07-14 05:37:00+00:00",
+   "reason": "order_win_drift: exit (held long enough)",
+   "charges": 53.5413
+  },
+  {
+   "order_id": 3,
+   "instrument_key": "NSE_EQ|INE000000B01",
+   "side": "buy",
+   "product": "intraday",
+   "quantity": 400,
+   "price": 255.0,
+   "at": "2026-07-15 03:45:00+00:00",
+   "reason": "order_win_drift: order win #2",
+   "charges": 30.4571
+  },
+  {
+   "order_id": 4,
+   "instrument_key": "NSE_EQ|INE000000B01",
+   "side": "sell",
+   "product": "intraday",
+   "quantity": 400,
+   "price": 268.79825,
+   "at": "2026-07-15 04:46:00+00:00",
+   "reason": "order_win_drift: exit (held long enough)",
+   "charges": 54.6025
+  }
+ ],
+ "orders": [
+  [
+   1,
+   "buy",
+   993,
+   993,
+   "filled",
+   ""
+  ],
+  [
+   2,
+   "sell",
+   993,
+   993,
+   "filled",
+   ""
+  ],
+  [
+   3,
+   "buy",
+   400,
+   400,
+   "filled",
+   ""
+  ],
+  [
+   4,
+   "sell",
+   400,
+   400,
+   "filled",
+   ""
+  ]
+ ],
+ "cash": 1011253.6521,
+ "equity": {
+  "2026-07-14": 1005819.4117,
+  "2026-07-15": 1011253.6521
+ }
+}

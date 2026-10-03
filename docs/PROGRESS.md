@@ -5,7 +5,7 @@ Claude Code updates this after every task. Newest log entry first.
 ## Status
 
 - **Version:** 0.2.0 · **Schema:** v7 · **Milestone:** M3 (M1 waits only on T1.6, HUMAN)
-- **Next up:** M6 T6.3 engine + SimBroker, then T6.4 risk, T6.5 ledger, T6.6 registry, T6.7 validation. T5.3 waits for live latency (recorder, item 1). Waiting on the human: recorder (1), M3 run (3), labels (5), Upstox token (6)
+- **Next up:** M6 T6.4 risk engine, then T6.5 ledger, T6.6 registry, T6.7 validation. T5.3 waits for live latency (recorder, item 1). Waiting on the human: recorder (1), M3 run (3), labels (5), Upstox token (6)
 
 ## Waiting on the human (HUMAN)
 
@@ -97,7 +97,7 @@ are PowerShell, run from `C:\Projects\GATS`.
 - [ ] M3 Event study (G1 kill test): T3.0 ⏳ (human) · T3.1 ⚠️ · T3.2 ✅ · T3.3 ✅ · T3.4 ✅ (code; real run ⏳ backfill) · T3.5 ⏳ (gate, after the real run)
 - [ ] M4 LLM extraction (infrastructure for ORDER_WIN; scope confirmed at G1): T4.1 ✅ · T4.2 ✅ · T4.3 ✅ · T4.4 ✅ · T4.5 ⏳ (code ✅; labels: human) · T4.6 · T4.7
 - [ ] M5 Intraday data & reaction curves (G1b): T5.1 ⏳ (code ✅; token: human, item 6) · T5.2 ⏳ (code ✅; the fetch needs the token) · T5.3 · T5.4
-- [ ] M6 Backtester (G2): T6.1 ⏳ (model ✅; broker-calculator check needs the token, item 6) · T6.2 ✅ · T6.3 · T6.4 · T6.5 · T6.6 · T6.7 · T6.8
+- [ ] M6 Backtester (G2): T6.1 ⏳ (model ✅; broker-calculator check needs the token, item 6) · T6.2 ✅ · T6.3 ✅ · T6.4 · T6.5 · T6.6 · T6.7 · T6.8
 - [ ] M7 Paper trading (G3)
 - [ ] M8 Live pilot (G4, human-only)
 
@@ -112,6 +112,16 @@ are PowerShell, run from `C:\Projects\GATS`.
 ## Log
 
 - **2026-10-03:**
+  - T6.3 done. `gats.backtest.engine`: replays events and 1-minute bars in the order they
+    became known and runs a strategy as live would. Pessimistic fills: latency (an order
+    fills in a bar that starts after it reaches the market), protection band (a gap
+    through it = no fill), 10% participation, spread + impact slippage, no fills into
+    circuits (flat bars at the day's extreme count as locked when limits are unknown),
+    15:20 square-off and no new intraday entries after it, T+1 delivery and settlement, no
+    leverage, verified costs per fill. Golden test: S1 on a tiny two-day market. Found by
+    the golden run: a stateless strategy repeated its exit until the fill; the Context now
+    shows working orders and the engine drops duplicate exits. Spread, impact and band
+    are assumptions for G3 paper trading to calibrate.
   - T6.2 done. `gats.strategy`: strategies are pure (no I/O, no hidden state; positions and
     the clock come through a read-only Context), so one object runs in replay, paper and
     live, and a restart or a replayed day decides the same (tested). Params from YAML,

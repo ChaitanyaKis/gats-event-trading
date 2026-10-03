@@ -10,6 +10,10 @@ Schema v7 (new tables only), upgraded automatically.
   `gats bars show` summarises a day, and `gats probe upstox-candles`
   checks a day's bars against NSE's end-of-day file. New optional
   dependency (extra `research`): duckdb.
+- **Backtest engine:** `gats.backtest.engine` replays events and 1-minute
+  bars through a strategy with pessimistic fills (latency, protection band,
+  participation cap, slippage, circuit locks, 15:20 square-off, T+1
+  delivery, no leverage) and charges every fill with the verified cost model.
 - **Strategy interface:** strategies (`gats.strategy`) map events and bars
   to signals with no I/O or hidden state, so the same object runs in
   backtest, paper and live; parameters come from `configs/strategies/` and

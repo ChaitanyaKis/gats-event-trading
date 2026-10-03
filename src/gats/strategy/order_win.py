@@ -49,7 +49,8 @@ class OrderWinDrift(Strategy[OrderWinParams]):
 
     def on_event(self, event: MarketEvent, ctx: Context) -> list[Signal]:
         p = self.params
-        if event.event_type != "ORDER_WIN" or ctx.position(event.instrument_key) is not None:
+        key = event.instrument_key
+        if event.event_type != "ORDER_WIN" or ctx.position(key) is not None or ctx.pending(key):
             return []
         if ctx.now - event.available_at > timedelta(minutes=p.max_signal_delay_minutes):
             return []
@@ -62,12 +63,14 @@ class OrderWinDrift(Strategy[OrderWinParams]):
         if p.entry_cutoff_ist <= clock < _SESSION_CLOSE:
             return []
         reason = f"{self.name}: order win #{event.event_id}"
-        return [Signal(event.instrument_key, "buy", p.product, reason, ctx.now)]
+        return [Signal(key, "buy", p.product, reason, ctx.now)]
 
     def on_bar(self, bar: BarEvent, ctx: Context) -> list[Signal]:
         p = self.params
         held = ctx.position(bar.instrument_key)
         if held is None or held.quantity <= 0 or not held.reason.startswith(self.name):
+            return []
+        if ctx.pending(bar.instrument_key) < 0:  # the exit is already on its way
             return []
         clock = to_ist(ctx.now).time()
         timed_out = ctx.now - held.opened_at >= timedelta(minutes=p.hold_minutes)

@@ -94,6 +94,12 @@ class Context(Protocol):
 
     def positions(self) -> list[Position]: ...
 
+    def pending(self, instrument_key: str) -> int:
+        """Shares in working orders: positive to buy, negative to sell. A
+        stateless strategy needs this to avoid repeating an order that has
+        been sent but not filled yet."""
+        ...
+
 
 class StrategyParams(BaseModel):
     """Base for a strategy's parameters: strict, immutable."""
@@ -144,6 +150,7 @@ class StaticContext:
 
     clock: datetime
     held: dict[str, Position] = field(default_factory=dict)
+    working: dict[str, int] = field(default_factory=dict)
 
     @property
     def now(self) -> datetime:
@@ -154,3 +161,6 @@ class StaticContext:
 
     def positions(self) -> list[Position]:
         return list(self.held.values())
+
+    def pending(self, instrument_key: str) -> int:
+        return self.working.get(instrument_key, 0)

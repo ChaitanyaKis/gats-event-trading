@@ -185,3 +185,10 @@ def test_one_object_two_runtimes_same_decisions(strategy: OrderWinDrift) -> None
     assert [s.side for s in replayed] == ["buy", "sell"]
     assert replayed[1].created_at - replayed[0].created_at == timedelta(minutes=60)
     assert strategy.__dict__ == before  # no hidden state: a restart changes nothing
+
+
+def test_orders_on_their_way_are_not_repeated(strategy: OrderWinDrift) -> None:
+    buying = StaticContext(at(11, 0), working={KEY: 993})
+    assert strategy.on_event(order_win(at(11, 0)), buying) == []
+    selling = StaticContext(at(12, 1), {KEY: position(at(11, 0))}, working={KEY: -10})
+    assert strategy.on_bar(bar(at(12, 0)), selling) == []
