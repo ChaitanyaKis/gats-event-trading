@@ -35,7 +35,7 @@ from sqlalchemy import (
 
 from gats.db.types import UTCDateTime
 
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 
 metadata = MetaData(
     naming_convention={
@@ -515,4 +515,28 @@ bar_months = Table(
     Column("raw_doc_id", String(64)),
     Column("last_error", Text),
     Column("updated_at", UTCDateTime, nullable=False),
+)
+
+# Every research run (T6.6): written before the run starts, so a crashed or
+# abandoned run still counts. Distinct designs (params_hash) are the trial
+# count behind the multiple-testing corrections.
+experiments = Table(
+    "experiments",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("kind", String(32), nullable=False),  # event_study | backtest
+    Column("name", String(128), nullable=False),  # study or strategy
+    Column("params_hash", String(64), nullable=False),
+    Column("params", JSON),
+    Column("data_start", Date),
+    Column("data_end", Date),
+    Column("holdout", Boolean, nullable=False),  # read the test period
+    Column("git_sha", String(40)),
+    Column("git_dirty", Boolean),
+    Column("status", String(16), nullable=False),  # running | done | failed
+    Column("metrics", JSON),
+    Column("error", Text),
+    Column("started_at", UTCDateTime, nullable=False),
+    Column("finished_at", UTCDateTime),
+    Index(None, "kind", "name"),
 )

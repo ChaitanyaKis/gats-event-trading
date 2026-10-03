@@ -949,6 +949,7 @@ def research_event_study(
 ) -> None:
     """Run the pre-registered event study on complete data (refuses otherwise)."""
     from gats.research.event_study import filter_counts, run_event_study, to_records, write_parquet
+    from gats.research.registry import experiment
     from gats.research.runs import (
         data_readiness,
         database_fingerprint,
@@ -985,7 +986,19 @@ def research_event_study(
                 f"(first {earlier[0]['run_id']}). This is a reproduction; nothing may be "
                 "tuned on its test-period results."
             )
-        results = run_event_study(clock, cfg)
+        registered = experiment(
+            engine,
+            kind="event_study",
+            name=cfg.study,
+            params_hash=digest,
+            params={"config": config.as_posix(), "taxonomy_version": cfg.taxonomy_version},
+            data_start=cfg.data.start,
+            data_end=cfg.data.end,
+            holdout=True,  # the study reads its test period
+        )
+        with registered as run:
+            results = run_event_study(clock, cfg)
+            run.metrics = {"events": len(results)}
         fingerprint = database_fingerprint(conn)
     engine.dispose()
     run_id = stamp()
@@ -1735,3 +1748,37 @@ async def _probe_upstox_charges(settings: Settings, symbol: str, probes_dir: Pat
                 verdict = "ok" if same else "DIFFERS"
                 typer.echo(f"  {name:21} broker {value:10.2f}  model {shown:>10}  {verdict}")
     return 1 if differences else 0
+
+
+experiments_app = typer.Typer(no_args_is_help=True, help="The experiment registry (T6.6).")
+app.add_typer(experiments_app, name="experiments")
+
+
+@experiments_app.command("list")
+def experiments_list(
+    kind: Annotated[str | None, typer.Option(help="event_study or backtest.")] = None,
+    limit: Annotated[int, typer.Option(help="Most recent runs to show.")] = 20,
+) -> None:
+    """Recent research runs and the number of distinct designs tried."""
+    from gats.research.registry import recent, trial_count
+
+    settings = _settings(log_to_file=False)
+    engine = make_engine(settings.resolved_db_url)
+    init_db(engine)
+    with engine.begin() as conn:
+        rows = recent(conn, kind=kind, limit=limit)
+        designs = trial_count(conn, kind=kind)
+    engine.dispose()
+    typer.echo(f"{designs} distinct design(s) tried" + (f" of kind {kind}" if kind else ""))
+    for row in rows:
+        sha = (row.git_sha or "no-git")[:7] + ("*" if row.git_dirty else "")
+        window = f"{row.data_start}..{row.data_end}"
+        held = " HOLDOUT" if row.holdout else ""
+        typer.echo(
+            f"#{row.id} {to_ist(row.started_at):%Y-%m-%d %H:%M} {row.kind} {row.name} "
+            f"{row.params_hash[:12]} {window}{held} {sha} {row.status}"
+        )
+        metrics = row.metrics or {}
+        shown = {k: metrics[k] for k in ("events", "trades", "net_pnl", "sharpe") if k in metrics}
+        if shown or row.error:
+            typer.echo(f"     {shown if shown else ''}{' ' + row.error if row.error else ''}")

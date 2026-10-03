@@ -4,8 +4,8 @@ Claude Code updates this after every task. Newest log entry first.
 
 ## Status
 
-- **Version:** 0.2.0 · **Schema:** v7 · **Milestone:** M3 (M1 waits only on T1.6, HUMAN)
-- **Next up:** M6 T6.6 experiment registry, then T6.7 validation. T5.3 waits for live latency (recorder, item 1). Waiting on the human: recorder (1), M3 run (3), labels (5), Upstox token (6)
+- **Version:** 0.2.0 · **Schema:** v8 · **Milestone:** M3 (M1 waits only on T1.6, HUMAN)
+- **Next up:** M6 T6.7 validation (walk-forward, deflated Sharpe, leak test), then the T6.8 report shell. T5.3 waits for live latency (recorder, item 1). Waiting on the human: recorder (1), M3 run (3), labels (5), Upstox token (6)
 
 ## Waiting on the human (HUMAN)
 
@@ -97,7 +97,7 @@ are PowerShell, run from `C:\Projects\GATS`.
 - [ ] M3 Event study (G1 kill test): T3.0 ⏳ (human) · T3.1 ⚠️ · T3.2 ✅ · T3.3 ✅ · T3.4 ✅ (code; real run ⏳ backfill) · T3.5 ⏳ (gate, after the real run)
 - [ ] M4 LLM extraction (infrastructure for ORDER_WIN; scope confirmed at G1): T4.1 ✅ · T4.2 ✅ · T4.3 ✅ · T4.4 ✅ · T4.5 ⏳ (code ✅; labels: human) · T4.6 · T4.7
 - [ ] M5 Intraday data & reaction curves (G1b): T5.1 ⏳ (code ✅; token: human, item 6) · T5.2 ⏳ (code ✅; the fetch needs the token) · T5.3 · T5.4
-- [ ] M6 Backtester (G2): T6.1 ⏳ (model ✅; broker-calculator check needs the token, item 6) · T6.2 ✅ · T6.3 ✅ · T6.4 ✅ · T6.5 ✅ · T6.6 · T6.7 · T6.8
+- [ ] M6 Backtester (G2): T6.1 ⏳ (model ✅; broker-calculator check needs the token, item 6) · T6.2 ✅ · T6.3 ✅ · T6.4 ✅ · T6.5 ✅ · T6.6 ✅ · T6.7 · T6.8
 - [ ] M7 Paper trading (G3)
 - [ ] M8 Live pilot (G4, human-only)
 
@@ -112,6 +112,13 @@ are PowerShell, run from `C:\Projects\GATS`.
 ## Log
 
 - **2026-10-03:**
+  - T6.6 done. `experiments` table (schema v8) and `gats.research.registry.experiment`: the
+    row is written before the run starts, so crashed and abandoned runs still count;
+    trials = distinct designs (params hash), so a rerun is a reproduction. Backtests run
+    only through `gats.backtest.runner.run_backtest`, which registers first (if the row
+    cannot be written the strategy is never called: tested); its design hash covers
+    strategy, costs, risk limits and engine settings, with the git commit recorded. The
+    M3 event study registers too. `gats experiments list` shows runs and the trial count.
   - T6.5 done. `gats.backtest.ledger`: FIFO trades with both sides' charges pro rata; the
     trades' net P&L less open lots equals the fills' cash flow to the paisa (tested on the
     golden run and on a run ending with shares held and unsettled cash). Metrics: net/gross

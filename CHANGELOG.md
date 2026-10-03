@@ -1,7 +1,7 @@
 # Changelog
 
 ## Unreleased
-Schema v7 (new tables only), upgraded automatically.
+Schema v8 (new tables only), upgraded automatically.
 
 - **One-minute bars (groundwork):** `gats probe upstox-instruments` reads
   Upstox's public instrument file; with the read-only Analytics Token in
@@ -10,6 +10,10 @@ Schema v7 (new tables only), upgraded automatically.
   `gats bars show` summarises a day, and `gats probe upstox-candles`
   checks a day's bars against NSE's end-of-day file. New optional
   dependency (extra `research`): duckdb.
+- **Experiment registry:** every research run (event studies, backtests) is
+  recorded in `experiments` before it starts, with its design hash, data
+  window, git commit and results; `gats experiments list` shows them and
+  how many distinct designs were tried.
 - **Ledger and metrics:** `gats.backtest.ledger` turns fills into FIFO
   trades that reconcile to the paisa and computes P&L, drawdown,
   Sharpe/Sortino, turnover, a capacity estimate and informational tax
