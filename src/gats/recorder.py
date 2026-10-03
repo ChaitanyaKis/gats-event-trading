@@ -27,8 +27,8 @@ from gats.logging_setup import kv
 from gats.refdata import dedupe, master, versions
 from gats.refdata.ingest import ingest_bse_scrips, ingest_nse_symbol_changes
 from gats.refdata.link import link_pending
-from gats.sources import bse_scrips, nse_archives, nse_symbols
-from gats.timeutil import is_weekday, ist_time_of_day, ist_today
+from gats.sources import bse_scrips, nse_symbols
+from gats.timeutil import ist_time_of_day, ist_today
 
 log = logging.getLogger(__name__)
 
@@ -131,23 +131,25 @@ class EodJob:
         return self.check_s
 
     def due_days(self, svc: Services) -> list[date]:
+        """Days in the catch-up window still worth asking about. Weekends are
+        included: special sessions (e.g. the Sunday budget-day session of
+        2026-02-01) publish a file too."""
         now = svc.clock()
         today = ist_today(now)
         days = []
         with svc.engine.begin() as conn:
             for back in range(self.catchup_days - 1, -1, -1):
                 day = today - timedelta(days=back)
-                if not is_weekday(day):
-                    continue
                 if day == today and ist_time_of_day(now) < self.publish_after:
                     continue
                 if repo.has_rows_for_date(
                     conn, ingest.snapshot_table_for("eod"), "trade_date", day
                 ):
                     continue
-                url = nse_archives.eod_url(svc.settings.nse_eod_url_template, day)
-                if day < today and repo.count_not_found(conn, url) >= self.max_missing_attempts:
-                    continue  # holiday: stop asking
+                if repo.eod_day_settled(
+                    repo.eod_day(conn, day), today=today, max_attempts=self.max_missing_attempts
+                ):
+                    continue  # holiday or weekend: stop asking
                 days.append(day)
         return days
 

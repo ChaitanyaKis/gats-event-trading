@@ -320,3 +320,20 @@ announcement_event_group = Table(
     Column("grouped_at", UTCDateTime, nullable=False),
     Index(None, "event_group_id"),
 )
+
+# Per-day EOD bookkeeping (T2.6). A day is `loaded`, `not_published` (the
+# file 404s: weekends, or before publication) or `other_day` (NSE served a
+# copy of another session's file, which it does for weekday holidays). The
+# recorder stops asking about a closed day after a few attempts, and the
+# trading calendar is derived from these rows.
+eod_days = Table(
+    "eod_days",
+    metadata,
+    Column("trade_date", Date, primary_key=True),
+    Column("status", String(16), nullable=False),
+    Column("attempts", Integer, nullable=False),
+    Column("n_records", Integer, nullable=False),
+    Column("file_date", Date),  # for other_day: the session the file really holds
+    Column("http_status", Integer),
+    Column("updated_at", UTCDateTime, nullable=False),
+)

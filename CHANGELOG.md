@@ -1,7 +1,13 @@
 # Changelog
 
 ## Unreleased
-- **Cross-exchange events:** the same disclosure filed on BSE and NSE is
+- **Fix: EOD on holidays.** NSE serves a copy of the previous session's file
+  under a weekday holiday's name instead of a 404, so the recorder refetched
+  holiday files every 30 minutes for 10 days. Each day's outcome is now kept
+  in `eod_days` (`loaded` / `not_published` / `other_day`) and retries stop.
+  Weekends are checked too, since special sessions (e.g. the Sunday budget
+  session of 2026-02-01) publish files; `gats backfill eod --no-weekends`
+  skips them.- **Cross-exchange events:** the same disclosure filed on BSE and NSE is
   grouped into one event timed at the earliest dissemination (recorder job
   `dedupe`, `gats refdata dedupe` for history). Research reads events via
   `AsOf.events_since()`.- Announcements store the attachment size each exchange reports

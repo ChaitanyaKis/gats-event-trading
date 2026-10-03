@@ -422,7 +422,7 @@ async def ingest_eod_day(svc: Services, day: date, *, job: str, mode: IngestMode
         log_transport_failure(svc, job, url, got)
         return got
     if got.status == 404:
-        # Normal on holidays and before publication; logged so retries are bounded.
+        # Normal on weekends and before publication; recorded so retries are bounded.
         with svc.engine.begin() as conn:
             repo.log_fetch(
                 conn,
@@ -433,6 +433,9 @@ async def ingest_eod_day(svc: Services, day: date, *, job: str, mode: IngestMode
                 http_status=404,
                 ok=True,
                 n_records=0,
+            )
+            repo.record_eod_day(
+                conn, day, status="not_published", n_records=0, now=svc.clock(), http_status=404
             )
         return Outcome(ok=True, http_status=404, meta={"not_found": True})
     if not got.ok:
@@ -486,6 +489,27 @@ async def ingest_eod_day(svc: Services, day: date, *, job: str, mode: IngestMode
             parser_version=nse_archives.EOD_PARSER_VERSION,
             available_at=available_at,
         )
+        dates_seen = [date.fromisoformat(d) for d in parsed.meta.get("dates_seen", [])]
+        if parsed.records:
+            repo.record_eod_day(
+                conn,
+                day,
+                status="loaded",
+                n_records=len(parsed.records),
+                now=svc.clock(),
+                http_status=got.status,
+            )
+        else:
+            # A weekday holiday's URL serves the previous session's file.
+            repo.record_eod_day(
+                conn,
+                day,
+                status="other_day" if dates_seen else "not_published",
+                n_records=0,
+                now=svc.clock(),
+                file_date=max(dates_seen) if dates_seen else None,
+                http_status=got.status,
+            )
         repo.log_fetch(
             conn,
             job=job,

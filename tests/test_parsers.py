@@ -140,7 +140,8 @@ class TestNseArchives:
     def test_eod_drops_rows_from_other_dates(self) -> None:
         result = nse_archives.parse_eod(EOD_CSV, trade_date=date(2026, 9, 24))
         assert result.records == []
-        assert len(result.warnings) == 2
+        assert result.warnings == ["2 rows dated 2026-09-25, not 2026-09-24: dropped"]
+        assert result.meta["dates_seen"] == ["2026-09-25"]
 
     def test_eod_missing_columns_fails_loudly(self) -> None:
         with pytest.raises(PayloadError, match="missing columns"):

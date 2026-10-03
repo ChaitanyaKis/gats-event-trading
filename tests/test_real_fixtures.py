@@ -194,7 +194,8 @@ class TestNseArchivesReal:
             load("nse_eod_2026-10-01.csv"), trade_date=date(2026, 10, 2)
         )
         assert parsed.records == []
-        assert len(parsed.warnings) == 30
+        assert parsed.warnings == ["30 rows dated 2026-10-01, not 2026-10-02: dropped"]
+        assert parsed.meta["dates_seen"] == ["2026-10-01"]
 
     def test_bands(self) -> None:
         parsed = nse_archives.parse_bands(load("nse_bands_2026-10-02.csv"))

@@ -331,24 +331,39 @@ def backfill_announcements(
 def backfill_eod(
     start: Annotated[str, typer.Option(help="First day, YYYY-MM-DD.")],
     end: Annotated[str, typer.Option(help="Last day, YYYY-MM-DD.")],
+    weekends: Annotated[
+        bool, typer.Option(help="Also ask for weekends (special sessions publish files).")
+    ] = True,
 ) -> None:
-    """Load historical end-of-day prices + delivery data (weekdays only)."""
+    """Load historical end-of-day prices + delivery data (resumable).
+
+    Days already loaded, or already known to have had no session, are skipped.
+    """
     settings = _settings()
     first, last = _parse_day(start), _parse_day(end)
 
     async def main() -> None:
         async with _services(settings) as svc:
+            today = ist_today()
             for day in daterange(first, last):
-                if day.weekday() >= 5:
+                if day.weekday() >= 5 and not weekends:
                     continue
                 with svc.engine.begin() as conn:
                     if repo.has_rows_for_date(
                         conn, ingest.snapshot_table_for("eod"), "trade_date", day
+                    ) or repo.eod_day_settled(
+                        repo.eod_day(conn, day),
+                        today=today,
+                        max_attempts=settings.eod_max_missing_attempts,
                     ):
-                        typer.echo(f"{day}: already loaded")
                         continue
                 outcome = await ingest.ingest_eod_day(svc, day, job="backfill_eod", mode="backfill")
-                label = f"{day} (no file: holiday?)" if outcome.http_status == 404 else str(day)
+                if outcome.http_status == 404:
+                    label = f"{day} (no file: weekend or not published)"
+                elif outcome.ok and outcome.n_records == 0:
+                    label = f"{day} (no session: the file holds another day)"
+                else:
+                    label = str(day)
                 _print_outcome(label, outcome)
 
     try:

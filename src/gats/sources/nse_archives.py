@@ -8,6 +8,7 @@ loudly when required columns are missing, instead of writing bad rows.
 
 from __future__ import annotations
 
+from collections import Counter
 from datetime import date
 
 from gats.sources._util import clean_str, looks_like_html, read_csv, to_float, to_int
@@ -52,18 +53,25 @@ def parse_eod(payload: bytes, *, trade_date: date) -> ParseResult[EodRecord]:
     """Parse ``sec_bhavdata_full_DDMMYYYY.csv``.
 
     The requested date is authoritative; rows whose own DATE1 disagrees are
-    dropped with a warning (a mismatch means NSE served a different file).
+    dropped. A mismatch means NSE served a different day's file: verified
+    2026-10-03, a weekday holiday's URL returns a copy of the previous
+    session (``..._02102026.csv`` holds 01-Oct-2026 rows). ``meta["dates_seen"]``
+    lists the DATE1 values found, so callers can tell such a copy apart.
     """
     rows = _checked_csv(payload, _EOD_REQUIRED, "EOD file")
     result: ParseResult[EodRecord] = ParseResult(records=[])
+    other_days: Counter[date] = Counter()
+    seen: set[date] = set()
     for index, row in enumerate(rows):
         symbol, series = clean_str(row.get("SYMBOL")), clean_str(row.get("SERIES"))
         if not symbol or not series:
             result.warnings.append(f"row {index}: missing symbol/series")
             continue
         row_date = parse_date(row.get("DATE1"))
+        if row_date is not None:
+            seen.add(row_date)
         if row_date is not None and row_date != trade_date:
-            result.warnings.append(f"row {index} {symbol}: DATE1 {row_date} != {trade_date}")
+            other_days[row_date] += 1
             continue
         result.records.append(
             EodRecord(
@@ -84,6 +92,9 @@ def parse_eod(payload: bytes, *, trade_date: date) -> ParseResult[EodRecord]:
                 deliv_pct=to_float(row.get("DELIV_PER")),
             )
         )
+    for other, count in sorted(other_days.items()):
+        result.warnings.append(f"{count} rows dated {other}, not {trade_date}: dropped")
+    result.meta["dates_seen"] = sorted(d.isoformat() for d in seen)
     return result
 
 

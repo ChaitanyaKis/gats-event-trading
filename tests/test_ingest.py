@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, date, datetime, time, timedelta
+from types import SimpleNamespace
+from typing import Any
 
 import httpx
 import respx
@@ -247,12 +249,64 @@ class TestEod:
         assert count(svc, eod_prices) == 2
         assert holiday.call_count == 2  # stops asking after the limit
 
-    async def test_due_days_skips_weekend_and_before_publish(
+    async def test_due_days_include_weekends_and_wait_for_publish(
         self, svc: Services, clock: FakeClock
     ) -> None:
+        # Weekends are asked about too: special sessions publish files.
         clock.now = datetime(2026, 9, 28, 6, 0, tzinfo=UTC)  # Mon 11:30 IST
         job = EodJob("eod", 1800, catchup_days=4, publish_after=time(18), max_missing_attempts=3)
-        assert job.due_days(svc) == [date(2026, 9, 25)]
+        assert job.due_days(svc) == [date(2026, 9, 25), date(2026, 9, 26), date(2026, 9, 27)]
+
+    @respx.mock
+    async def test_holiday_copy_of_previous_session_is_recorded_and_bounded(
+        self, svc: Services, clock: FakeClock
+    ) -> None:
+        # Verified 2026-10-03: a weekday holiday's URL serves the previous
+        # session's file (here: 2026-09-25 rows under the 2026-09-28 name).
+        clock.now = datetime(2026, 9, 28, 14, 0, tzinfo=UTC)  # Mon 19:30 IST
+        respx.get(NSE_HOME).mock(return_value=httpx.Response(200))
+        copy = respx.get(EOD_URL.format("28092026")).mock(
+            return_value=httpx.Response(200, content=EOD_CSV)
+        )
+        job = EodJob("eod", 1800, catchup_days=1, publish_after=time(18), max_missing_attempts=2)
+        for _ in range(4):
+            await job.run_once(svc)
+        assert copy.call_count == 2  # stops asking after the limit
+        assert count(svc, eod_prices) == 0  # nothing stored under the wrong date
+        with svc.engine.begin() as conn:
+            row = repo.eod_day(conn, date(2026, 9, 28))
+        assert row is not None
+        assert (row.status, row.attempts, row.file_date) == ("other_day", 2, date(2026, 9, 25))
+
+    @respx.mock
+    async def test_weekend_special_session_is_loaded(self, svc: Services, clock: FakeClock) -> None:
+        # A Sunday session (like budget day 2026-02-01) publishes its own file.
+        clock.now = datetime(2026, 9, 27, 14, 0, tzinfo=UTC)  # Sun 19:30 IST
+        respx.get(NSE_HOME).mock(return_value=httpx.Response(200))
+        sunday_csv = EOD_CSV.replace(b"25-Sep-2026", b"27-Sep-2026")
+        respx.get(EOD_URL.format("27092026")).mock(
+            return_value=httpx.Response(200, content=sunday_csv)
+        )
+        job = EodJob("eod", 1800, catchup_days=1, publish_after=time(18), max_missing_attempts=2)
+        await job.run_once(svc)
+        with svc.engine.begin() as conn:
+            row = repo.eod_day(conn, date(2026, 9, 27))
+        assert row is not None and (row.status, row.n_records) == ("loaded", 2)
+
+    def test_settled_rule(self) -> None:
+        today = date(2026, 10, 3)
+
+        def row(status: str, attempts: int, day: date) -> Any:
+            return SimpleNamespace(status=status, attempts=attempts, trade_date=day)
+
+        assert repo.eod_day_settled(row("loaded", 1, today), today=today, max_attempts=3)
+        assert not repo.eod_day_settled(None, today=today, max_attempts=3)
+        # Today/yesterday: a 404 may just mean "not published yet".
+        assert not repo.eod_day_settled(row("not_published", 1, today), today=today, max_attempts=3)
+        assert repo.eod_day_settled(row("not_published", 3, today), today=today, max_attempts=3)
+        # Older days: archive files do not change, one answer is final.
+        old = today - timedelta(days=5)
+        assert repo.eod_day_settled(row("other_day", 1, old), today=today, max_attempts=3)
 
     @respx.mock
     async def test_backfill_available_at_is_publish_time(self, svc: Services) -> None:

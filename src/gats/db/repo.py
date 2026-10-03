@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import asdict
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Any, Literal
 
 from sqlalchemy import Connection, Row, Table, func, select, update
@@ -17,6 +17,7 @@ from sqlalchemy.dialects import postgresql, sqlite
 from gats.db.schema import (
     announcements,
     backfill_days,
+    eod_days,
     eod_prices,
     fetch_log,
     instrument_snapshots,
@@ -151,16 +152,6 @@ def log_fetch(
             n_records=n_records,
             n_new=n_new,
         )
-    )
-
-
-def count_not_found(conn: Connection, url: str) -> int:
-    return int(
-        conn.execute(
-            select(func.count())
-            .select_from(fetch_log)
-            .where(fetch_log.c.url == url, fetch_log.c.http_status == 404)
-        ).scalar_one()
     )
 
 
@@ -546,3 +537,60 @@ def backfill_summary(conn: Connection) -> dict[str, int]:
             )
         )
     }
+
+
+# --- EOD day bookkeeping ----------------------------------------------------------
+
+EOD_CLOSED = frozenset({"not_published", "other_day"})
+
+
+def eod_day(conn: Connection, day: date) -> Row[Any] | None:
+    return conn.execute(select(eod_days).where(eod_days.c.trade_date == day)).first()
+
+
+def record_eod_day(
+    conn: Connection,
+    day: date,
+    *,
+    status: str,
+    n_records: int,
+    now: datetime,
+    file_date: date | None = None,
+    http_status: int | None = None,
+) -> None:
+    attempts = (
+        conn.execute(
+            select(eod_days.c.attempts).where(eod_days.c.trade_date == day)
+        ).scalar_one_or_none()
+        or 0
+    ) + 1
+    upsert(
+        conn,
+        eod_days,
+        [
+            {
+                "trade_date": day,
+                "status": status,
+                "attempts": attempts,
+                "n_records": n_records,
+                "file_date": file_date,
+                "http_status": http_status,
+                "updated_at": now,
+            }
+        ],
+        ["trade_date"],
+        ["status", "attempts", "n_records", "file_date", "http_status", "updated_at"],
+    )
+
+
+def eod_day_settled(row: Row[Any] | None, *, today: date, max_attempts: int) -> bool:
+    """True when nothing more is expected for this day: it is loaded, or it
+    is closed and either asked about often enough or long past (archive files
+    for past days do not change)."""
+    if row is None:
+        return False
+    if row.status == "loaded":
+        return True
+    return row.status in EOD_CLOSED and (
+        row.attempts >= max_attempts or row.trade_date <= today - timedelta(days=2)
+    )
