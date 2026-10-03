@@ -47,6 +47,15 @@ from gats.refdata.ingest import (
     ingest_nse_symbol_changes,
 )
 from gats.refdata.link import link_pending
+from gats.research.taxonomy import (
+    CONTAINERS,
+    NOISE,
+    OTHER,
+    Taxonomy,
+    classify_pending,
+    coverage,
+    event_level_coverage,
+)
 from gats.sources import (
     bse,
     bse_scrips,
@@ -837,3 +846,63 @@ def refdata_dedupe(
         f"{total.filings} filings: {total.pairs} cross-exchange pairs, "
         f"{total.singles} single-exchange events (rules {dedupe.RULES_VERSION})"
     )
+
+
+# --- events ----------------------------------------------------------------------------
+
+events_app = typer.Typer(no_args_is_help=True, help="Event typing (taxonomy).")
+app.add_typer(events_app, name="events")
+
+
+def _taxonomy(settings: Settings) -> Taxonomy:
+    if not settings.taxonomy_path.exists():
+        typer.echo(
+            f"taxonomy not found: {settings.taxonomy_path.resolve()} (run from the repo root)"
+        )
+        raise typer.Exit(1)
+    return Taxonomy.load(settings.taxonomy_path)
+
+
+@events_app.command("classify")
+def events_classify() -> None:
+    """Type every filing not yet typed under the current taxonomy version."""
+    settings = _settings()
+    tax = _taxonomy(settings)
+    engine = make_engine(settings.resolved_db_url)
+    init_db(engine)
+    with engine.begin() as conn:
+        stats = classify_pending(conn, tax, utcnow())
+    engine.dispose()
+    typer.echo(
+        f"{tax.version}: typed {stats.classified} filings {dict(stats.by_type.most_common())}"
+    )
+
+
+@events_app.command("coverage")
+def events_coverage(
+    top: Annotated[int, typer.Option(help="Unmapped category patterns to list.")] = 15,
+) -> None:
+    """Share of non-noise filings the taxonomy leaves as OTHER (target <= 10%)."""
+    settings = _settings(log_to_file=False)
+    tax = _taxonomy(settings)
+    engine = make_engine(settings.resolved_db_url)
+    init_db(engine)
+    with engine.begin() as conn:
+        filings = coverage(conn, tax.version, top=top)
+        events = event_level_coverage(conn, tax.version)
+    engine.dispose()
+    containers = sum(events.by_type.get(c, 0) for c in sorted(CONTAINERS))
+    non_noise = events.total - events.by_type.get(NOISE, 0)
+    typer.echo(f"{tax.version}: {filings.total} filings typed")
+    typer.echo(f"  OTHER, per filing:          {filings.other_share_excl_noise:.1%} of non-noise")
+    typer.echo(f"  OTHER, typed via its event: {events.other_share_excl_noise:.1%} of non-noise")
+    if non_noise:
+        typer.echo(
+            "  ... counting containers (BOARD_OUTCOME, PRESS_RELEASE) as OTHER: "
+            f"{(events.by_type.get(OTHER, 0) + containers) / non_noise:.1%}"
+        )
+    for event_type, n in sorted(events.by_type.items(), key=lambda x: -x[1]):
+        typer.echo(f"    {event_type:20} {n}")
+    typer.echo("  top OTHER patterns (filing level):")
+    for source, cat, sub, n in filings.unmapped:
+        typer.echo(f"    {n:6}  {source} | {cat} | {sub}")

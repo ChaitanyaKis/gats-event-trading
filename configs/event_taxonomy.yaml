@@ -1,0 +1,199 @@
+# Event taxonomy: exchange filing metadata -> event_type.
+#
+# Rules are tried in order; the first rule with a matching clause wins. A
+# clause matches when every field it sets matches:
+#   source:       NSE | BSE
+#   category:     list, exact match (case-insensitive) on NSE `desc` or BSE CATEGORYNAME
+#   subcategory:  list, exact match on BSE SUBCATNAME
+#   text:         regex (case-insensitive) over category + subcategory + subject + details
+#   not_text:     regex that must NOT match
+# Exact category rules come first; free-text rules are confined to the
+# generic buckets (see `generic`) so, e.g., an AGM notice that mentions a
+# dividend stays AGM_NOISE.
+#
+# Built from 30 days of real filings (2026-09, 17k NSE + 37k BSE). Changing
+# anything here changes results: bump `version`.
+#
+# Types beyond the roadmap's v0 list, added because the data needs them:
+#   RATING_OTHER    new / reaffirmed / withdrawn ratings (no direction)
+#   HOLDING_CHANGE  SAST/PIT holding disclosures (buy or sell is in the PDF)
+#   INSOLVENCY      IBC / CIRP / liquidation
+#   BUSINESS_UPDATE capacity, production, launches, agreements, approvals,
+#                   monthly business figures
+#   LISTING         new listings
+#   BOARD_OUTCOME   a board-meeting outcome whose text names no decision
+#   PRESS_RELEASE   a press release whose text names no event
+# The last two are the exchanges' own container categories, used only after
+# every content rule failed; coverage reports OTHER with and without them.
+# AGM_NOISE covers all procedural and exchange-driven filings (meetings,
+# publications, trading windows, investor-meet schedules, ESOP allotments,
+# compliance certificates, exchange price/volume queries and replies).
+
+version: taxonomy-v1  # stored as "taxonomy-v1+<hash of this file>"; v0 was the development draft
+
+# Buckets whose category says nothing; only these are typed by free text.
+generic:
+  - {source: NSE, category: ["General Updates", "Updates", "Others", "Disclosure of material issue", "Outcome of Board Meeting", "Press Release", "Press Release (Revised)"]}
+  - {source: BSE, category: ["Company Update"], subcategory: ["General", "Press Release / Media Release", "Press Release / Media Release (Revised)", "Meeting Updates", "Revision of outcome"]}
+  - {source: BSE, category: ["Others"], subcategory: ["None", "Outcome without intimation"]}
+  - {source: BSE, category: ["Board Meeting"], subcategory: ["Outcome of Board Meeting", "Board Meeting"]}
+
+rules:
+  # --- categories that are the event ------------------------------------------
+  - type: RESULTS
+    when:
+      - {source: BSE, category: ["Result"]}
+      - {source: NSE, category: ["Financial Results", "Integrated Filing- Financial"]}
+  - type: ORDER_WIN
+    when:
+      - {source: NSE, category: ["Bagging/Receiving of orders/contracts", "Awarding of order(s)/contract(s)"]}
+      - {source: BSE, subcategory: ["Award of Order / Receipt of Order"]}
+  - type: RATING_UP
+    when:
+      - {category: ["Credit Rating", "Credit Rating- Revision", "Credit Rating- New", "Credit Rating- Others"], text: 'upgrad'}
+      - {source: BSE, subcategory: ["Credit Rating"], text: 'upgrad'}
+  - type: RATING_DOWN
+    when:
+      - {category: ["Credit Rating", "Credit Rating- Revision", "Credit Rating- New", "Credit Rating- Others"], text: 'downgrad|negative|rating watch'}
+      - {source: BSE, subcategory: ["Credit Rating"], text: 'downgrad|negative|rating watch'}
+  - type: RATING_OTHER
+    when:
+      - {category: ["Credit Rating", "Credit Rating- Revision", "Credit Rating- New", "Credit Rating- Others"]}
+      - {source: BSE, subcategory: ["Credit Rating"]}
+  - type: BUYBACK
+    when:
+      - {source: NSE, category: ["Buyback", "Public Announcement - Buyback of Shares", "Closure of Buy Back", "Post Buyback Public Announcement"]}
+      - {source: BSE, subcategory: ["Daily Buy Back of equity shares", "Buy back", "Public Announcement-Buyback of Shares", "Closure of Buy Back", "Post Buyback Public Announcement"]}
+  - type: BONUS_SPLIT
+    when:
+      - {source: NSE, category: ["Bonus", "Stock split"]}
+      - {source: BSE, subcategory: ["Bonus", "Sub-division / Stock Split"]}
+  - type: DIVIDEND
+    when:
+      - {source: NSE, category: ["Dividend"]}
+      - {source: BSE, subcategory: ["Dividend", "Dividend Updates", "Dividend/AGM", "Date of payment of Dividend"]}
+      - {source: NSE, category: ["Record Date", "Revised Record date"], text: '\bdividend|\bDI\b'}
+      - {source: BSE, subcategory: ["Record Date", "Book Closure"], text: 'dividend'}
+  - type: ACQUISITION
+    when:
+      - {source: NSE, category: ["Acquisition", "Amalgamation/Merger", "Scheme of Arrangement", "Demerger", "Sale or disposal", "Diversification/Disinvestment", "Other Restructuring", "Public Announcement-Open Offer"]}
+      - {source: BSE, subcategory: ["Acquisition", "Scheme of Arrangement", "Amalgamation / Merger / Demerger", "Restructuring", "Diversification / Disinvestment", "Joint Venture", "Open Offer", "Open Offer - Updates", "Public Announcement-Open Offer", "Change in Management Control"]}
+  - type: FUNDRAISE
+    when:
+      - {source: NSE, category: ["Issue of Securities", "Qualified Institutional Placement", "Preferential issue", "Rights Issue"]}
+      - {source: BSE, subcategory: ["Issue of Securities", "Preferential Issue", "Qualified Institutional Placement", "Raising of Funds", "Institutional Placement Programme", "Allotment of Warrants", "Bonds / Right issue", "Offer for Sale"]}
+      - {source: NSE, category: ["Allotment of Securities"], text: 'preferential|warrant|qualified institution|\bqip\b|rights'}
+      - {source: BSE, subcategory: ["Allotment of Equity Shares"], text: 'preferential|warrant|qualified institution|\bqip\b|rights'}
+  - type: PLEDGE_CHANGE
+    when:
+      - {source: BSE, subcategory: ["Disclosures under Reg. 31(1) and 31(2) of SEBI (SAST) Regulations, 2011"]}
+  - type: HOLDING_CHANGE
+    when:
+      - {source: NSE, category: ["Disclosure under SEBI Takeover Regulations", "Trading Plan under PIT"]}
+      - {source: BSE, category: ["Insider Trading / SAST"], not_text: 'trading window'}
+      - {source: BSE, subcategory: ["Trading Plan under SEBI (PIT) Regulations, 2015"]}
+  - type: MGMT_CHANGE
+    when:
+      - {source: NSE, category: ["Appointment", "Resignation", "Resignation of Director/KMP/SMP", "Change in Management", "Change in Director(s)", "Cessation", "Retirement", "Change in Company Secretary/Compliance Officer", "Demise", "Change in Auditors", "Resignation of Statutory Auditor"]}
+      - {source: BSE, subcategory: ["Change in Management", "Change in Directorate", "Resignation of Director", "Resignation of Company Secretary / Compliance Officer", "Cessation", "Appointment of Company Secretary / Compliance Officer", "Appointment of Statutory Auditor/s", "Resignation of Statutory Auditors", "Resignation of Chief Financial Officer (CFO)", "Resignation of Managing Director", "Retirement", "Demise", "Resignation of Chief Executive Officer (CEO)", "Resignation of Chairman", "Resignation of Chairman and Managing Director"]}
+  - type: PENALTY_LITIGATION
+    when:
+      - {source: NSE, category: ["Action(s) taken or orders passed", "Action(s) initiated or orders passed", "Pendency of Litigation(s)/dispute(s) or the outcome impacting the Company", "Fraud/Default/Arrest", "Defaults on Payment of Interest/Principal", "Delay/default in the payment of fines/penalties/dues etc. to authority", "Strikes/Lockouts/Disturbances", "Disruption of Operations", "Suspension of Trading", "Reasons for Delayed/Non-submission of Financial Results", "Effect(s) on listed entity due to changed regulatory framework applicable"]}
+      - {source: BSE, subcategory: ["Strikes /Lockouts / Disturbances", "Strike"]}
+      - {source: BSE, category: ["Others"], text: 'default'}
+  - type: INSOLVENCY
+    when:
+      - {source: NSE, category: ["Corporate Insolvency Resolution Process"]}
+      - {source: BSE, subcategory: ["Updates - Corporate Insolvency Resolution Process (CIRP)", "Intimation of meeting of Committee of Creditors", "Outcome of meeting of Committee of Creditors", "Approval of Resolution plan by Tribunal", "Invitation of Resolution Plan", "List of Creditors", "Admission of application by Tribunal", "Replacement of Interim Resolution Professional (IRP)", "Winding-up"]}
+  - type: BUSINESS_UPDATE
+    when:
+      - {source: NSE, category: ["Monthly Business Updates", "Commencement of commercial production/operations", "Capacity addition", "Product launch", "Postponement of commercial production/operations", "Agreements", "Memorandum of Understanding/Agreements", "Arrangements for strategic, technical, manufacturing, or marketing tie up", "Adoption of new line(s) of business", "Granting/withdrawal/surrender/cancellation/suspension of key licenses/ regulatory approvals", "Giving guarantees/indemnity/ becoming a surety for third party", "Rescission/termination(s)"]}
+      - {source: BSE, subcategory: ["Monthly Business Updates", "Memorandum of Understanding /Agreements"]}
+  - type: LISTING
+    when:
+      - {source: BSE, category: ["New Listing"]}
+
+  # --- procedural and exchange-driven ----------------------------------------
+  - type: AGM_NOISE
+    when:
+      - {source: NSE, category: ["Shareholders meeting", "Trading Window", "Copy of Newspaper Publication", "Analysts/Institutional Investor Meet/Con. Call Updates", "Investor Presentation", "ESOP/ESOS/ESPS", "Options to purchase securities", "Record Date", "Revised Record date", "Certificate under SEBI (Depositories and Participants) Regulations, 2018", "Corrigendum", "Addendum", "Committee Meeting Updates", "Loss of Share Certificates", "Issue of Duplicate Share Certificate", "Extension of Annual General Meeting", "Address Change", "Structural Digital Database", "Registrar & Share Transfer Agent Update", "Amendment to AOA/MOA", "Name Change", "Name and Symbol Change", "Increase in Authorised Capital", "Monitoring Agency Report", "Clarification - Financial Results", "Reply to Clarification- Financial results", "Spurt in Volume", "Price movement", "News Verification", "Rumour Verification - Regulation 30(11)", "Redemption", "Conversion", "Allotment of Securities"]}
+      - {source: BSE, category: ["AGM/EGM"]}
+      - {source: BSE, subcategory: ["Closure of Trading Window", "Newspaper Publication", "Reg. 34 (1) Annual Report", "Analyst / Investor Meet", "Book Closure", "Record Date", "Allotment of ESOP / ESPS", "Allotment of Equity Shares", "Certificate under Reg. 74 (5) of SEBI (DP) Regulations, 2018", "Amendments to Memorandum & Articles of Association", "Reg. 39 (3) - Details of Loss of Certificate / Duplicate Certificate", "Investor Presentation", "Earnings Call Transcript", "Change in Registered Office Address", "Change in Corporate Office Address", "Code of Conduct under SEBI (PIT) Regulations, 2015", "Board Meeting Rescheduled", "Board Meeting Cancelled", "Reg.24(A)-Annual Secretarial Compliance", "Certificate from CEO/CFO", "57 (4) : Prior intimation to the beginning of the quarter", "57 (5) : intimation after the end of quarter", "Reg. 57 (1) - Certificate of interest payment/Principal in case of NCD", "Intimation of Repayment of Commercial Paper (CP)", "Half Yearly Report (SEBI Circular No. CIR/IMD/DF-1/67/2017)", "Asset Liability Management (ALM) statement", "Business Responsibility and Sustainability Reporting (BRSR)", "Committee Meeting", "Interest Rates Updates", "Conversion of Securities", "Change of Name", "Clarification", "Monitoring Agency Report", "Reg. 32 (1), (3) - Statement of Deviation & Variation", "Public Announcement", "Reg. 50 (2) - Intimation to the Exchange about meeting under 50(2)", "Reg. 50 (1) - Prior intimation about Board meeting under Regulation 50(1))"]}
+      - {source: BSE, category: ["Insider Trading / SAST"], text: 'trading window'}
+      - {source: BSE, category: ["Others"], text: 'compliance certificate|initial disclosure|large corporate'}
+
+  # --- generic buckets: typed by their text ------------------------------------
+  - type: RESULTS
+    generic_only: true
+    when:
+      - {text: 'financial results|\b(un)?audited\b.{0,40}\bresults\b|results for the (quarter|period|half year|year)', not_text: 'board meeting intimation|intimation (of|for|regarding) (the )?(board )?meeting|to consider|to be held|will be held|is scheduled|scheduled (on|to|for)|prior intimation|trading window'}
+  - type: ORDER_WIN
+    generic_only: true
+    when:
+      - {text: '\b(receiv|bag|secur|won|win|award)\w*\b.{0,60}\b(order|contract|work order|letter of (award|acceptance|intent)|\bLo[AI]\b)', not_text: 'assessment|income[- ]tax|\btax\b|\bgst\b|demand|penalt|show cause|tribunal|court|\bnclt\b|\bnclat\b|\bsebi\b|enforcement|attachment order|arbitra'}
+      - {text: 'successful bidder|\bl-?1 bidder|lowest bidder|emerged as (the )?l-?1|letter of award|notification of award|declared (as )?(the )?(successful|preferred) bidder'}
+      - {text: '\b(order|contract)s?\b.{0,40}\b(receiv|bag|secur|award)\w*', not_text: 'assessment|income[- ]tax|\btax\b|\bgst\b|demand|penalt|show cause|tribunal|court|\bnclt\b|\bnclat\b|\bsebi\b|enforcement|attachment order|arbitra'}
+  - type: BUYBACK
+    generic_only: true
+    when:
+      - {text: '\bbuy\s*-?\s*back\b'}
+  - type: BONUS_SPLIT
+    generic_only: true
+    when:
+      - {text: '\bbonus (issue|shares|equity)|\bsub-?division\b|\bstock split\b|split of (equity )?shares'}
+  - type: FUNDRAISE
+    generic_only: true
+    when:
+      - {text: 'qualified institutions? placement|\bqip\b|preferential (issue|allotment)|rights issue|fund\s*-?\s*rais|raising of funds|\bwarrants?\b|non-convertible debentures|\bncds?\b|medium term note|\bbonds?\b.{0,40}(listing|issu|allot)|issu\w* of (bonds|debentures|notes)|call money|first and final call', not_text: 'interest payment|payment of interest|redemption|repayment|record date|tender offer|buy\s*-?back'}
+  - type: PLEDGE_CHANGE
+    generic_only: true
+    when:
+      - {text: '\bpledg|encumbrance|reg(ulation)?\.?\s*31\s*\(1\)'}
+  - type: HOLDING_CHANGE
+    generic_only: true
+    when:
+      - {text: 'reg(ulation)?\.?\s*29\s*\((1|2)\)|\bsast\b|takeover regulations|\bpit\b regulations|re-?classification.{0,40}promoter|promoter.{0,40}re-?classification'}
+  - type: ACQUISITION
+    generic_only: true
+    when:
+      - {text: '\bacqui(re|red|ring|sition)\b|\bmerger\b|\bamalgamation\b|\bdemerger\b|joint venture|open offer|takeover|post offer|\bstake\b.{0,40}\b(sale|sell|purchase|buy|acqui)|\bsubsidiary\b.{0,40}\b(incorporat|formation)|incorporat\w* (of|a) .{0,60}(subsidiary|limited|company|inc|llc|gmbh|pte)|wholly[- ]owned subsidiary'}
+  - type: DIVIDEND
+    generic_only: true
+    when:
+      - {text: '\bdividend\b', not_text: 'annual general meeting|\bagm\b|notice of|\btds\b|tax deduct|communication to (the )?shareholders'}
+  - type: PENALTY_LITIGATION
+    generic_only: true
+    when:
+      - {text: 'penalt|\bfine[sd]?\b|show cause|litigation|lawsuit|arbitra|search operation|\braid\b|enforcement directorate|income tax (search|survey|department)|\bgst\b.{0,40}(demand|notice|order)|tax demand|order passed|\bsuit\b|\bpetition\b|\bnclt\b|\bnclat\b|tribunal|\bhigh court\b|supreme court|\bjudgment|\bsebi\b.{0,30}(order|notice)|\bdefault'}
+  - type: INSOLVENCY
+    generic_only: true
+    when:
+      - {text: 'insolvency|\bcirp\b|committee of creditors|resolution (plan|professional)|liquidat'}
+  - type: MGMT_CHANGE
+    generic_only: true
+    when:
+      - {text: '\b(appoint|re-?appoint|resign|cessation|retire|demise)\w*\b|change in (management|directorate|auditor|senior management)|senior management|key managerial|\bkmp\b|\bsmp\b'}
+  - type: RATING_OTHER
+    generic_only: true
+    when:
+      - {text: '\bcredit rating|\besg rating|\brating\b'}
+  - type: BUSINESS_UPDATE
+    generic_only: true
+    when:
+      - {text: 'commercial (production|operation)|capacity|product launch|launch(ed|es)?\b|\bmou\b|memorandum of understanding|\bagreement\b|tie[- ]?up|(regulatory|statutory|government) approval|approval (from|by|of) (the )?(us ?fda|fda|dcgi|cdsco|rbi|irdai|government|ministry|authority|regulator)|licen[cs]e|business update|operational update|project update|sales (update|figures|volume)|provisional (financial )?figures|production (update|numbers)|\bplant\b|\bfacility\b|\bpatent\b|commission(ing|ed)\b|inaugurat|new (store|showroom|outlet|branch|hospital|office|unit)|opening of|newly opened|accreditation|\bnabh\b|\busfda\b|\bfda\b|\bdcgi\b|clearance|expansion|recogni[sz]ed as|award(ed)? .{0,30}(for|as) (the )?best'}
+  - type: AGM_NOISE
+    generic_only: true
+    when:
+      - {text: 'annual report|annual general meeting|\bagm\b|\begm\b|e-?voting|postal ballot|scrutini[sz]er|newspaper|trading window|investor(s)? (meet|call|roadshow|conference)|analyst|con(ference)? call|earnings call|transcript|re-?lodg|physical shares|\bdemat\b|letter (sent )?to (the )?(shareholders|members)|web-?link|74\s*\(5\)|loss of (share )?certificate|duplicate|compliance|\bbrsr\b|business responsibility|book closure|record date|\besop|\besos|\besps|stock option|cut-?off date|chairman.{0,10}speech|presentation|reconstitution|closure of register|price movement|volume movement|clarification|reply to (query|clarification)|board meeting (intimation|on|to be held|adjourn|resched)|intimation of board meeting|prior intimation|recording of|outcome of (the )?(committee|agm)|corrigendum|addendum|regulation (6|7|36|39|40|42|46|47|74)\b|commercial paper|exercise of (stock )?options|vesting|dispatch of|investor deck|corporate identity number|\bcin\b|certificate (from|under)|participation in|intimation of (the )?schedule|regulation (23|33|57|169)\b'}
+
+  # --- the exchanges' container categories, when nothing above matched -------
+  - type: BOARD_OUTCOME
+    generic_only: true
+    when:
+      - {source: NSE, category: ["Outcome of Board Meeting"]}
+      - {source: BSE, subcategory: ["Outcome of Board Meeting", "Outcome without intimation", "Revision of outcome"]}
+  - type: PRESS_RELEASE
+    generic_only: true
+    when:
+      - {source: NSE, category: ["Press Release", "Press Release (Revised)"]}
+      - {source: BSE, subcategory: ["Press Release / Media Release", "Press Release / Media Release (Revised)"]}

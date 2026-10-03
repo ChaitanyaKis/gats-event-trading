@@ -84,6 +84,7 @@ def test_build_jobs_respects_flags(svc: Services) -> None:
         "master_build",
         "link",
         "dedupe",
+        "classify",
     }
     svc.settings.nse_enabled = False
     svc.settings.attachments_enabled = False

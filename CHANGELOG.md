@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+- **Event types:** every filing is typed by a versioned, rule-based
+  taxonomy (`configs/event_taxonomy.yaml`): order wins, results, ratings,
+  buybacks, bonus/splits, dividends, M&A, fund raises, pledges, management
+  changes, litigation, insolvency, business updates, and procedural noise.
+  New recorder job `classify`; `gats events classify` and
+  `gats events coverage`. New dependency: PyYAML.
+
 ## 0.2.0 (2026-10-03)
 M1 finishing (verified endpoints, real fixtures, health checks, two
 recorder bug fixes) and M2 (reference data). Schema v5, upgraded

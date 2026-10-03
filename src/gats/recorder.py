@@ -33,6 +33,7 @@ from gats.refdata.ingest import (
     ingest_nse_symbol_changes,
 )
 from gats.refdata.link import link_pending
+from gats.research.taxonomy import Taxonomy, classify_pending
 from gats.sources import (
     bse_scrips,
     nse_corp_actions,
@@ -299,6 +300,30 @@ class DedupeJob:
 
 
 @dataclass
+class ClassifyJob:
+    """Type new filings with the event taxonomy (reloaded when the file changes)."""
+
+    name: str
+    poll_s: float
+    path: Path
+    _taxonomy: Taxonomy | None = field(default=None, init=False)
+    _mtime: float | None = field(default=None, init=False)
+
+    def interval_s(self, now: datetime) -> float:
+        return self.poll_s
+
+    async def run_once(self, svc: Services) -> Outcome:
+        if not self.path.exists():
+            return Outcome(ok=False, error=f"taxonomy file not found: {self.path.resolve()}")
+        mtime = self.path.stat().st_mtime
+        if self._taxonomy is None or mtime != self._mtime:
+            self._taxonomy, self._mtime = Taxonomy.load(self.path), mtime
+        with svc.engine.begin() as conn:
+            stats = classify_pending(conn, self._taxonomy, svc.clock())
+        return Outcome(ok=True, n_records=stats.classified, n_new=stats.classified)
+
+
+@dataclass
 class AttachmentsJob:
     name: str
     poll_s: float
@@ -457,6 +482,7 @@ def build_jobs(svc: Services) -> list[Job]:
         jobs.append(MasterBuildJob("master_build", s.snapshot_check_s, s.master_build_after_ist))
         jobs.append(LinkJob("link", s.link_poll_s))
         jobs.append(DedupeJob("dedupe", s.dedupe_poll_s, s.dedupe_lookback_days))
+        jobs.append(ClassifyJob("classify", s.classify_poll_s, s.taxonomy_path))
     if s.attachments_enabled:
         jobs.append(AttachmentsJob("attachments", s.attachments_poll_s))
     sources = tuple(

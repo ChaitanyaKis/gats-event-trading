@@ -436,3 +436,16 @@ surveillance_versions = Table(
     Column("parser_version", String(32), nullable=False),
     Index(None, "symbol"),
 )
+
+# Event type of each filing per taxonomy version (T3.1). A new taxonomy
+# version adds rows; studies record the version they used.
+announcement_event_types = Table(
+    "announcement_event_types",
+    metadata,
+    Column("announcement_id", Integer, ForeignKey("announcements.id"), primary_key=True),
+    Column("taxonomy_version", String(32), primary_key=True),
+    Column("event_type", String(32), nullable=False),
+    Column("rule_no", Integer),  # index of the matching rule; NULL for OTHER
+    Column("classified_at", UTCDateTime, nullable=False),
+    Index(None, "taxonomy_version", "event_type"),
+)
