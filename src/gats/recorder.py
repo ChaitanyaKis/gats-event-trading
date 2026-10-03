@@ -27,11 +27,12 @@ from gats.logging_setup import kv
 from gats.refdata import dedupe, master, versions
 from gats.refdata.ingest import (
     ingest_bse_scrips,
+    ingest_nse_corp_actions,
     ingest_nse_holidays,
     ingest_nse_symbol_changes,
 )
 from gats.refdata.link import link_pending
-from gats.sources import bse_scrips, nse_holidays, nse_symbols
+from gats.sources import bse_scrips, nse_corp_actions, nse_holidays, nse_symbols
 from gats.timeutil import ist_time_of_day, ist_today
 
 log = logging.getLogger(__name__)
@@ -416,10 +417,24 @@ def build_jobs(svc: Services) -> list[Job]:
         async def fetch_holidays(svc: Services) -> Outcome:
             return await ingest_nse_holidays(svc, job="nse_holidays")
 
+        async def fetch_corp_actions(svc: Services) -> Outcome:
+            today = ist_today(svc.clock())
+            return await ingest_nse_corp_actions(
+                svc,
+                today - timedelta(days=s.corp_actions_lookback_days),
+                today + timedelta(days=s.corp_actions_lookahead_days),
+                job="nse_corp_actions",
+            )
+
         for name, kind, fetch in (
             ("bse_scrips", bse_scrips.KIND, fetch_bse_scrips),
             ("nse_symbol_changes", nse_symbols.KIND, fetch_symbol_changes),
             ("nse_holidays", nse_holidays.KIND, fetch_holidays),
+            *(
+                [("nse_corp_actions", nse_corp_actions.KIND, fetch_corp_actions)]
+                if s.corp_actions_enabled
+                else []
+            ),
         ):
             jobs.append(
                 RefdataJob(name, kind, s.snapshot_check_s, s.daily_snapshot_after_ist, fetch)

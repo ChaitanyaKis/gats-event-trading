@@ -31,6 +31,7 @@ from gats.sources import (
     bse_scrips,
     nse,
     nse_archives,
+    nse_corp_actions,
     nse_holidays,
     nse_indices,
     nse_symbols,
@@ -42,7 +43,9 @@ log = logging.getLogger(__name__)
 
 # Reference files applied by gats.refdata (kept here so reparse can route them
 # without importing gats.refdata at module load: it imports this module).
-REFERENCE_KINDS = frozenset({bse_scrips.KIND, nse_symbols.KIND, nse_holidays.KIND})
+REFERENCE_KINDS = frozenset(
+    {bse_scrips.KIND, nse_symbols.KIND, nse_holidays.KIND, nse_corp_actions.KIND}
+)
 
 
 @dataclass

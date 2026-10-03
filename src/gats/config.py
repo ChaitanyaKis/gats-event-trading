@@ -62,6 +62,10 @@ class Settings(BaseSettings):
     nse_symbol_changes_url: str = (
         "https://nsearchives.nseindia.com/content/equities/symbolchange.csv"
     )
+    nse_corp_actions_url: str = "https://www.nseindia.com/api/corporates-corporateActions"
+    nse_corp_actions_referer: str = (
+        "https://www.nseindia.com/companies-listing/corporate-filings-actions"
+    )
     nse_holidays_url: str = "https://www.nseindia.com/api/holiday-master"
     nse_holidays_referer: str = "https://www.nseindia.com/resources/exchange-communication-holidays"
     # Verified 2026-10-02 (needs browser headers + BSE homepage cookies).
@@ -156,6 +160,11 @@ class Settings(BaseSettings):
     eod_publish_after_ist: time = time(18, 0)
     eod_max_missing_attempts: int = Field(default=3, ge=1)
     indices_enabled: bool = True  # NSE index closes, same schedule as EOD
+    # Corporate actions: refetched daily for a window around today, because
+    # NSE announces actions weeks before their ex-date and revises them.
+    corp_actions_enabled: bool = True
+    corp_actions_lookback_days: int = Field(default=30, ge=1)
+    corp_actions_lookahead_days: int = Field(default=90, ge=0)
 
     snapshots_enabled: bool = True
     refdata_enabled: bool = True  # BSE scrip list (and later reference files)

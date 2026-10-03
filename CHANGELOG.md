@@ -1,7 +1,11 @@
 # Changelog
 
 ## Unreleased
-- **Benchmark indices:** daily closes of every NSE index (Nifty 50/500,
+- **Corporate actions:** NSE's corporate actions are recorded daily
+  (`nse_corp_actions` job; `gats backfill corporate-actions` for history),
+  with splits, bonuses and consolidations turned into share multipliers.
+  Daily returns must be computed with `ReturnAdjuster` (`AsOf.return_adjuster()`):
+  NSE's `PREV_CLOSE` is not adjusted on ex-dates.- **Benchmark indices:** daily closes of every NSE index (Nifty 50/500,
   Midcap 150, Smallcap 250, sectors, …) via a new recorder job
   `nse_indices`, `gats backfill indices --start … --end …` and
   `gats probe indices`.- **Trading calendar:** `gats.refdata.calendar` knows NSE sessions from the

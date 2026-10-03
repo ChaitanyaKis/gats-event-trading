@@ -41,6 +41,7 @@ from gats.refdata import dedupe, master
 from gats.refdata.coverage import bse_scrip_isin_coverage, link_coverage
 from gats.refdata.ingest import (
     ingest_bse_scrips,
+    ingest_nse_corp_actions,
     ingest_nse_holidays,
     ingest_nse_symbol_changes,
 )
@@ -50,6 +51,7 @@ from gats.sources import (
     bse_scrips,
     nse,
     nse_archives,
+    nse_corp_actions,
     nse_holidays,
     nse_indices,
     nse_symbols,
@@ -92,6 +94,7 @@ class ReparseKind(StrEnum):
     bse_scrips = bse_scrips.KIND
     nse_symbol_changes = nse_symbols.KIND
     nse_holidays = nse_holidays.KIND
+    nse_corp_actions = nse_corp_actions.KIND
 
 
 def _settings(log_to_file: bool = True) -> Settings:
@@ -392,6 +395,31 @@ def backfill_eod(
     _backfill_daily(
         ingest.EOD_FILE, _parse_day(start), _parse_day(end), weekends=weekends, job="backfill_eod"
     )
+
+
+@backfill_app.command("corporate-actions")
+def backfill_corporate_actions(
+    start: Annotated[str, typer.Option(help="First ex-date, YYYY-MM-DD.")],
+    end: Annotated[str, typer.Option(help="Last ex-date, YYYY-MM-DD.")],
+) -> None:
+    """Load NSE corporate actions, one request per year of ex-dates (idempotent)."""
+    settings = _settings()
+    first, last = _parse_day(start), _parse_day(end)
+
+    async def main() -> None:
+        async with _services(settings) as svc:
+            chunk_start = first
+            while chunk_start <= last:
+                chunk_end = min(
+                    last, date(chunk_start.year + 1, chunk_start.month, 1) - timedelta(days=1)
+                )
+                outcome = await ingest_nse_corp_actions(
+                    svc, chunk_start, chunk_end, job="backfill_corp_actions"
+                )
+                _print_outcome(f"{chunk_start}..{chunk_end}", outcome)
+                chunk_start = chunk_end + timedelta(days=1)
+
+    asyncio.run(main())
 
 
 @backfill_app.command("indices")

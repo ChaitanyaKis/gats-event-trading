@@ -18,10 +18,10 @@ from sqlalchemy import Connection, select
 from gats.db import repo
 from gats.db.schema import bse_scrips, market_holidays
 from gats.ingest import Outcome, Services, log_transport_failure, record_bad_payload, safe_get
-from gats.refdata import symbols
+from gats.refdata import actions, symbols
 from gats.refdata.versions import ApplyStats, apply_snapshot, log_snapshot
 from gats.sources import bse_scrips as bse_scrips_src
-from gats.sources import nse_holidays, nse_symbols
+from gats.sources import nse_corp_actions, nse_holidays, nse_symbols
 from gats.sources.models import PayloadError
 from gats.timeutil import ist_today
 
@@ -144,12 +144,41 @@ def apply_nse_holidays(
     )
 
 
+def apply_nse_corp_actions(
+    conn: Connection, payload: bytes, as_of: date, doc_id: str, available_at: datetime
+) -> ApplyStats:
+    parsed = nse_corp_actions.parse_corporate_actions(payload)
+    inserted = actions.store_actions(
+        conn,
+        parsed.records,
+        fetched_at=available_at,
+        raw_doc_id=doc_id,
+        parser_version=nse_corp_actions.PARSER_VERSION,
+    )
+    log_snapshot(
+        conn,
+        kind=nse_corp_actions.KIND,
+        as_of=as_of,
+        n_records=len(parsed.records),
+        n_changes=inserted,
+        available_at=available_at,
+        raw_doc_id=doc_id,
+        parser_version=nse_corp_actions.PARSER_VERSION,
+    )
+    return ApplyStats(
+        inserted=inserted, unchanged=len(parsed.records) - inserted, warnings=parsed.warnings
+    )
+
+
 BSE_SCRIPS = ReferenceFile(bse_scrips_src.KIND, bse_scrips_src.SOURCE, apply_bse_scrips)
 NSE_SYMBOL_CHANGES = ReferenceFile(nse_symbols.KIND, nse_symbols.SOURCE, apply_nse_symbol_changes)
 NSE_HOLIDAYS = ReferenceFile(nse_holidays.KIND, nse_holidays.SOURCE, apply_nse_holidays)
+NSE_CORP_ACTIONS = ReferenceFile(
+    nse_corp_actions.KIND, nse_corp_actions.SOURCE, apply_nse_corp_actions
+)
 
 FILES: Mapping[str, ReferenceFile] = {
-    f.kind: f for f in (BSE_SCRIPS, NSE_SYMBOL_CHANGES, NSE_HOLIDAYS)
+    f.kind: f for f in (BSE_SCRIPS, NSE_SYMBOL_CHANGES, NSE_HOLIDAYS, NSE_CORP_ACTIONS)
 }
 
 
@@ -281,5 +310,19 @@ async def ingest_nse_holidays(svc: Services, *, job: str) -> Outcome:
         job=job,
         params=nse_holidays.request_params(),
         headers=nse_holidays.request_headers(s.nse_holidays_referer),
+        warmup_url=s.nse_home_url,
+    )
+
+
+async def ingest_nse_corp_actions(svc: Services, start: date, end: date, *, job: str) -> Outcome:
+    """Corporate actions with ex-dates in ``[start, end]`` (one request)."""
+    s = svc.settings
+    return await ingest_reference_file(
+        svc,
+        NSE_CORP_ACTIONS,
+        s.nse_corp_actions_url,
+        job=job,
+        params=nse_corp_actions.request_params(start, end),
+        headers=nse_corp_actions.request_headers(s.nse_corp_actions_referer),
         warmup_url=s.nse_home_url,
     )

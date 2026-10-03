@@ -5,7 +5,7 @@ Claude Code updates this after every task. Newest log entry first.
 ## Status
 
 - **Version:** 0.1.2 · **Schema:** v4 · **Milestone:** M2 (M1 waits only on T1.6, HUMAN)
-- **Next up:** T2.8 Corporate-action safety
+- **Next up:** T2.9 Surveillance lists
 
 ## Waiting on the human (HUMAN)
 
@@ -36,7 +36,7 @@ are PowerShell, run from `C:\Projects\GATS`.
 
 - [x] M1 core recorder (0.1.0 → 0.1.2)
 - [ ] M1 finishing: T1.1 ✅ · T1.2 ✅ · T1.3 ✅ · T1.4 ✅ · T1.5 ✅ · T1.6
-- [ ] M2 Reference data & entity resolution: T2.1 ✅ · T2.2 ✅ · T2.3 ✅ · T2.4 ✅ · T2.5 ✅ · T2.6 ✅ · T2.7 ✅ · T2.8 · T2.9
+- [ ] M2 Reference data & entity resolution: T2.1 ✅ · T2.2 ✅ · T2.3 ✅ · T2.4 ✅ · T2.5 ✅ · T2.6 ✅ · T2.7 ✅ · T2.8 ✅ · T2.9
 - [ ] M3 Event study (G1 kill test)
 - [ ] M4 LLM extraction
 - [ ] M5 Intraday data & reaction curves (G1b)
@@ -55,6 +55,18 @@ are PowerShell, run from `C:\Projects\GATS`.
 ## Log
 
 - **2026-10-03:**
+  - T2.8 done. **Finding: NSE's `PREV_CLOSE` is not adjusted on ex-dates**
+    (10/10 real splits/bonuses, Sep 2025; naive returns −50%…−90%). So
+    returns use share multipliers from NSE's corporate-actions API
+    (verified; reports today's symbol for old actions, translated via the
+    symbol history): `gats.refdata.actions.ReturnAdjuster`,
+    `AsOf.return_adjuster()`, daily job `nse_corp_actions` (−30…+90 days),
+    `gats backfill corporate-actions` (17,019 actions 2019→2026 loaded).
+    Adjusted ex-date returns on the 10 cases: all within ±20% (max:
+    ADANIPOWER +20.0% real move); Sep 2026 pipeline check: 4 ex-dates,
+    naive −46%…−81% → adjusted −5%…+8%. Rights/demerger/bonus-preference
+    days (391) are flagged `needs_review` for exclusion; dividends are
+    parsed (`cash_per_share`) but returns are price returns.
   - T2.7 done. Index closes verified and stored (`index_eod`, `index_days`,
     recorder job `nse_indices`, `gats backfill indices`, `gats probe indices`,
     `AsOf.index_history()`). The EOD and index paths now share one generic

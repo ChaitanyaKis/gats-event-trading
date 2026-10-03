@@ -21,6 +21,7 @@ from gats.db.schema import (
     index_eod,
     price_bands,
 )
+from gats.refdata.actions import ReturnAdjuster
 from gats.refdata.calendar import TradingCalendar
 from gats.refdata.master import Resolver
 from gats.timeutil import ensure_aware, to_ist
@@ -32,6 +33,7 @@ class AsOf:
         self._as_of = ensure_aware(as_of)
         self._resolver: Resolver | None = None
         self._calendar: TradingCalendar | None = None
+        self._adjuster: ReturnAdjuster | None = None
 
     @property
     def as_of(self) -> datetime:
@@ -150,3 +152,11 @@ class AsOf:
         if start is not None:
             query = query.where(index_eod.c.trade_date >= start)
         return list(self._conn.execute(query.order_by(index_eod.c.trade_date)))
+
+    def return_adjuster(self) -> ReturnAdjuster:
+        """Split/bonus multipliers for actions knowable by the clock. Actions
+        are announced before their ex-date, so this never hides one that
+        affects a return already observed."""
+        if self._adjuster is None:
+            self._adjuster = ReturnAdjuster.load(self._conn, as_of=self._as_of)
+        return self._adjuster

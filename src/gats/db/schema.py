@@ -386,3 +386,31 @@ index_days = Table(
     Column("http_status", Integer),
     Column("updated_at", UTCDateTime, nullable=False),
 )
+
+# NSE corporate actions (T2.8). reported_symbol is the symbol NSE used when we
+# fetched the row (the API reports today's symbol for old actions), so joins
+# with prices translate it through the symbol history first.
+corporate_actions = Table(
+    "corporate_actions",
+    metadata,
+    Column("reported_symbol", String(64), primary_key=True),
+    Column("ex_date", Date, primary_key=True),
+    Column("subject", Text, primary_key=True),
+    Column("series", String(8)),
+    Column("isin", String(12)),
+    Column("company", Text),
+    Column("record_date", Date),
+    Column("face_value", Float),
+    Column("kind", String(16), nullable=False),
+    Column("share_multiplier", Float),
+    Column("cash_per_share", Float),
+    Column("needs_review", Boolean, nullable=False),
+    # min(first fetch, 00:00 IST on the ex-date): actions are announced
+    # before they go ex, so a backfilled action was knowable by that morning.
+    Column("available_at", UTCDateTime, nullable=False),
+    Column("first_seen_at", UTCDateTime, nullable=False),
+    Column("raw_doc_id", String(64), ForeignKey("raw_documents.doc_id"), nullable=False),
+    Column("parser_version", String(32), nullable=False),
+    Index(None, "ex_date"),
+    Index(None, "isin"),
+)
