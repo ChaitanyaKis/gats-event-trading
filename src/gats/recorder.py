@@ -25,9 +25,13 @@ from gats.db.repo import IngestMode
 from gats.ingest import Outcome, Services
 from gats.logging_setup import kv
 from gats.refdata import dedupe, master, versions
-from gats.refdata.ingest import ingest_bse_scrips, ingest_nse_symbol_changes
+from gats.refdata.ingest import (
+    ingest_bse_scrips,
+    ingest_nse_holidays,
+    ingest_nse_symbol_changes,
+)
 from gats.refdata.link import link_pending
-from gats.sources import bse_scrips, nse_symbols
+from gats.sources import bse_scrips, nse_holidays, nse_symbols
 from gats.timeutil import ist_time_of_day, ist_today
 
 log = logging.getLogger(__name__)
@@ -392,9 +396,13 @@ def build_jobs(svc: Services) -> list[Job]:
         async def fetch_symbol_changes(svc: Services) -> Outcome:
             return await ingest_nse_symbol_changes(svc, job="nse_symbol_changes")
 
+        async def fetch_holidays(svc: Services) -> Outcome:
+            return await ingest_nse_holidays(svc, job="nse_holidays")
+
         for name, kind, fetch in (
             ("bse_scrips", bse_scrips.KIND, fetch_bse_scrips),
             ("nse_symbol_changes", nse_symbols.KIND, fetch_symbol_changes),
+            ("nse_holidays", nse_holidays.KIND, fetch_holidays),
         ):
             jobs.append(
                 RefdataJob(name, kind, s.snapshot_check_s, s.daily_snapshot_after_ist, fetch)

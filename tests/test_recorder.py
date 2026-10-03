@@ -77,6 +77,7 @@ def test_build_jobs_respects_flags(svc: Services) -> None:
         "reconcile",
         "bse_scrips",
         "nse_symbol_changes",
+        "nse_holidays",
         "master_build",
         "link",
         "dedupe",

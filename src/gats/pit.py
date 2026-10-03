@@ -8,7 +8,7 @@ that can return a row the system could not have known at ``as_of``.
 
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, time
 from typing import Any
 
 from sqlalchemy import Connection, Row, func, select
@@ -20,6 +20,7 @@ from gats.db.schema import (
     eod_prices,
     price_bands,
 )
+from gats.refdata.calendar import TradingCalendar
 from gats.refdata.master import Resolver
 from gats.timeutil import ensure_aware, to_ist
 
@@ -29,6 +30,7 @@ class AsOf:
         self._conn = conn
         self._as_of = ensure_aware(as_of)
         self._resolver: Resolver | None = None
+        self._calendar: TradingCalendar | None = None
 
     @property
     def as_of(self) -> datetime:
@@ -127,3 +129,14 @@ class AsOf:
                 .order_by(func.min(a.c.available_at))
             )
         )
+
+    def calendar(
+        self, *, open_ist: time = time(9, 15), close_ist: time = time(15, 30)
+    ) -> TradingCalendar:
+        """The exchange calendar. Not clock-filtered: holidays are announced
+        in advance, and an unscheduled closure can only delay an entry."""
+        if self._calendar is None:
+            self._calendar = TradingCalendar.load(
+                self._conn, open_ist=open_ist, close_ist=close_ist
+            )
+        return self._calendar

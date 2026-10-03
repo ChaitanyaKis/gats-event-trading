@@ -59,6 +59,8 @@ class Settings(BaseSettings):
     nse_symbol_changes_url: str = (
         "https://nsearchives.nseindia.com/content/equities/symbolchange.csv"
     )
+    nse_holidays_url: str = "https://www.nseindia.com/api/holiday-master"
+    nse_holidays_referer: str = "https://www.nseindia.com/resources/exchange-communication-holidays"
     # Verified 2026-10-02 (needs browser headers + BSE homepage cookies).
     bse_scrips_url: str = "https://api.bseindia.com/BseIndiaAPI/api/ListofScripData/w"
 
@@ -138,6 +140,12 @@ class Settings(BaseSettings):
             "compliance certificate",
         ]
     )
+
+    # Regular equity session, IST. Source: NSE "Market Timings" page
+    # (nseindia.com/static/market-data/market-timings, checked 2026-10-03):
+    # normal market 09:15-15:30; pre-open 09:00-09:08; closing session 15:40-16:00.
+    session_open_ist: time = time(9, 15)
+    session_close_ist: time = time(15, 30)
 
     eod_enabled: bool = True
     eod_check_s: float = Field(default=1800.0, gt=0)

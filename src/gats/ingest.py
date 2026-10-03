@@ -19,7 +19,7 @@ from gats.db.schema import eod_prices, instrument_snapshots, price_bands
 from gats.logging_setup import kv
 from gats.net import Fetched, FetchError, PoliteClient
 from gats.rawstore import RawStore
-from gats.sources import bse, bse_scrips, nse, nse_archives, nse_symbols
+from gats.sources import bse, bse_scrips, nse, nse_archives, nse_holidays, nse_symbols
 from gats.sources.models import AnnouncementRecord, ParseResult, PayloadError
 from gats.timeutil import ist_datetime, ist_today, utcnow
 
@@ -27,7 +27,7 @@ log = logging.getLogger(__name__)
 
 # Reference files applied by gats.refdata (kept here so reparse can route them
 # without importing gats.refdata at module load: it imports this module).
-REFERENCE_KINDS = frozenset({bse_scrips.KIND, nse_symbols.KIND})
+REFERENCE_KINDS = frozenset({bse_scrips.KIND, nse_symbols.KIND, nse_holidays.KIND})
 
 
 @dataclass

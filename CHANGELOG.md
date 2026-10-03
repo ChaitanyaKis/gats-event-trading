@@ -1,7 +1,11 @@
 # Changelog
 
 ## Unreleased
-- **Fix: EOD on holidays.** NSE serves a copy of the previous session's file
+- **Trading calendar:** `gats.refdata.calendar` knows NSE sessions from the
+  EOD files, NSE's holiday list (new daily `nse_holidays` job) and weekends,
+  flags special sessions, and gives `next_session_open(t)`,
+  `session_open/close(d)` and `shift(d, n)` in IST hours 09:15–15:30
+  (`GATS_SESSION_OPEN_IST`, `GATS_SESSION_CLOSE_IST`).- **Fix: EOD on holidays.** NSE serves a copy of the previous session's file
   under a weekday holiday's name instead of a 404, so the recorder refetched
   holiday files every 30 minutes for 10 days. Each day's outcome is now kept
   in `eod_days` (`loaded` / `not_published` / `other_day`) and retries stop.

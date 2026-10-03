@@ -337,3 +337,16 @@ eod_days = Table(
     Column("http_status", Integer),
     Column("updated_at", UTCDateTime, nullable=False),
 )
+
+# NSE's published holiday list (current year only; see sources.nse_holidays).
+# Cumulative: each year's list is added as it is fetched.
+market_holidays = Table(
+    "market_holidays",
+    metadata,
+    Column("segment", String(16), primary_key=True),  # CM = equity cash market
+    Column("holiday_date", Date, primary_key=True),
+    Column("description", Text),
+    Column("available_at", UTCDateTime, nullable=False),
+    Column("raw_doc_id", String(64), ForeignKey("raw_documents.doc_id"), nullable=False),
+    Column("parser_version", String(32), nullable=False),
+)

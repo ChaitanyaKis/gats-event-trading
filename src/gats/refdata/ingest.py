@@ -13,15 +13,15 @@ from dataclasses import asdict, dataclass
 from datetime import date, datetime
 from typing import Any
 
-from sqlalchemy import Connection
+from sqlalchemy import Connection, select
 
 from gats.db import repo
-from gats.db.schema import bse_scrips
+from gats.db.schema import bse_scrips, market_holidays
 from gats.ingest import Outcome, Services, log_transport_failure, record_bad_payload, safe_get
 from gats.refdata import symbols
 from gats.refdata.versions import ApplyStats, apply_snapshot, log_snapshot
 from gats.sources import bse_scrips as bse_scrips_src
-from gats.sources import nse_symbols
+from gats.sources import nse_holidays, nse_symbols
 from gats.sources.models import PayloadError
 from gats.timeutil import ist_today
 
@@ -108,10 +108,49 @@ def apply_nse_symbol_changes(
     )
 
 
+def apply_nse_holidays(
+    conn: Connection, payload: bytes, as_of: date, doc_id: str, available_at: datetime
+) -> ApplyStats:
+    parsed = nse_holidays.parse_holidays(payload)
+    existing = {
+        (r.segment, r.holiday_date)
+        for r in conn.execute(select(market_holidays.c.segment, market_holidays.c.holiday_date))
+    }
+    rows = [
+        {
+            "segment": r.segment,
+            "holiday_date": r.holiday_date,
+            "description": r.description,
+            "available_at": available_at,
+            "raw_doc_id": doc_id,
+            "parser_version": nse_holidays.PARSER_VERSION,
+        }
+        for r in parsed.records
+        if (r.segment, r.holiday_date) not in existing
+    ]
+    repo.insert_ignore(conn, market_holidays, rows, ["segment", "holiday_date"])
+    log_snapshot(
+        conn,
+        kind=nse_holidays.KIND,
+        as_of=as_of,
+        n_records=len(parsed.records),
+        n_changes=len(rows),
+        available_at=available_at,
+        raw_doc_id=doc_id,
+        parser_version=nse_holidays.PARSER_VERSION,
+    )
+    return ApplyStats(
+        inserted=len(rows), unchanged=len(parsed.records) - len(rows), warnings=parsed.warnings
+    )
+
+
 BSE_SCRIPS = ReferenceFile(bse_scrips_src.KIND, bse_scrips_src.SOURCE, apply_bse_scrips)
 NSE_SYMBOL_CHANGES = ReferenceFile(nse_symbols.KIND, nse_symbols.SOURCE, apply_nse_symbol_changes)
+NSE_HOLIDAYS = ReferenceFile(nse_holidays.KIND, nse_holidays.SOURCE, apply_nse_holidays)
 
-FILES: Mapping[str, ReferenceFile] = {f.kind: f for f in (BSE_SCRIPS, NSE_SYMBOL_CHANGES)}
+FILES: Mapping[str, ReferenceFile] = {
+    f.kind: f for f in (BSE_SCRIPS, NSE_SYMBOL_CHANGES, NSE_HOLIDAYS)
+}
 
 
 # --- fetch path -------------------------------------------------------------------------
@@ -230,4 +269,17 @@ def reapply(
     available_at = datetime.fromisoformat(raw) if raw else fallback_available_at
     return FILES[kind].apply(
         conn, payload, date.fromisoformat(meta["as_of_date"]), doc_id, available_at
+    )
+
+
+async def ingest_nse_holidays(svc: Services, *, job: str) -> Outcome:
+    s = svc.settings
+    return await ingest_reference_file(
+        svc,
+        NSE_HOLIDAYS,
+        s.nse_holidays_url,
+        job=job,
+        params=nse_holidays.request_params(),
+        headers=nse_holidays.request_headers(s.nse_holidays_referer),
+        warmup_url=s.nse_home_url,
     )

@@ -39,9 +39,13 @@ from gats.rawstore import RawStore
 from gats.recorder import run_recorder
 from gats.refdata import dedupe, master
 from gats.refdata.coverage import bse_scrip_isin_coverage, link_coverage
-from gats.refdata.ingest import ingest_bse_scrips, ingest_nse_symbol_changes
+from gats.refdata.ingest import (
+    ingest_bse_scrips,
+    ingest_nse_holidays,
+    ingest_nse_symbol_changes,
+)
 from gats.refdata.link import link_pending
-from gats.sources import bse, bse_scrips, nse, nse_archives, nse_symbols
+from gats.sources import bse, bse_scrips, nse, nse_archives, nse_holidays, nse_symbols
 from gats.sources._util import preview
 from gats.sources.models import PayloadError
 from gats.status import build_report
@@ -77,6 +81,7 @@ class ReparseKind(StrEnum):
     nse_instruments = nse_archives.INSTRUMENTS_KIND
     bse_scrips = bse_scrips.KIND
     nse_symbol_changes = nse_symbols.KIND
+    nse_holidays = nse_holidays.KIND
 
 
 def _settings(log_to_file: bool = True) -> Settings:
@@ -619,6 +624,7 @@ def refdata_update() -> None:
             results = [
                 ("bse_scrips", await ingest_bse_scrips(svc, job=job)),
                 ("nse_symbol_changes", await ingest_nse_symbol_changes(svc, job=job)),
+                ("nse_holidays", await ingest_nse_holidays(svc, job=job)),
             ]
             for what in ("instruments", "bands"):
                 with svc.engine.begin() as conn:
