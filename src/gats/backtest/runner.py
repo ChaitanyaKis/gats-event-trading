@@ -25,6 +25,25 @@ from gats.research.registry import experiment
 from gats.strategy.base import BarEvent, MarketEvent, Strategy
 
 
+class HoldoutError(RuntimeError):
+    """A holdout run whose design was not pre-registered."""
+
+
+def require_preregistration(prereg: Path | None, params_hash: str) -> None:
+    """The holdout is spent once per design, and only on designs written
+    down beforehand: the document must contain the design's hash."""
+    if prereg is None or not prereg.exists():
+        raise HoldoutError(
+            "a holdout run needs a pre-registration document that records its design hash "
+            f"({params_hash})"
+        )
+    if params_hash not in prereg.read_text(encoding="utf-8"):
+        raise HoldoutError(
+            f"{prereg} does not record design {params_hash}: pre-register the design before "
+            "testing it on the holdout"
+        )
+
+
 def design(
     strategy: Strategy,  # type: ignore[type-arg]
     costs: CostModel,
@@ -57,10 +76,15 @@ def run_backtest(
     risk_version: str = "none",
     circuit_limits: CircuitLimits | None = None,
     sessions: Sequence[date] | None = None,
+    prereg: Path | None = None,
     root: Path = Path(),
 ) -> tuple[BacktestResult, Metrics, int]:
-    """Register, run, summarise; returns (result, metrics, experiment id)."""
+    """Register, run, summarise; returns (result, metrics, experiment id).
+    A holdout run is refused, before anything is computed or logged, unless
+    ``prereg`` records this design."""
     params_hash, params = design(strategy, costs, config, risk_version)
+    if holdout:
+        require_preregistration(prereg, params_hash)
     with experiment(
         db,
         kind="backtest",

@@ -10,6 +10,9 @@ Schema v8 (new tables only), upgraded automatically.
   `gats bars show` summarises a day, and `gats probe upstox-candles`
   checks a day's bars against NSE's end-of-day file. New optional
   dependency (extra `research`): duckdb.
+- **Backtest validation:** walk-forward splits with embargo and purging, the
+  deflated Sharpe ratio fed by the registry's trial count, a look-ahead leak
+  detector, and holdout runs that require a pre-registered design.
 - **Experiment registry:** every research run (event studies, backtests) is
   recorded in `experiments` before it starts, with its design hash, data
   window, git commit and results; `gats experiments list` shows them and
