@@ -10,6 +10,10 @@ Schema v7 (new tables only), upgraded automatically.
   `gats bars show` summarises a day, and `gats probe upstox-candles`
   checks a day's bars against NSE's end-of-day file. New optional
   dependency (extra `research`): duckdb.
+- **Risk engine:** `gats.risk.engine` vetoes orders by rule (order rate,
+  kill-switch file `data/KILL`, daily loss, position and symbol caps, open
+  positions, liquidity, surveillance lists, stale data); limits live in
+  `configs/risk.yaml`. The backtest engine and later runtimes share it.
 - **Backtest engine:** `gats.backtest.engine` replays events and 1-minute
   bars through a strategy with pessimistic fills (latency, protection band,
   participation cap, slippage, circuit locks, 15:20 square-off, T+1

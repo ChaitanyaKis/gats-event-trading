@@ -37,6 +37,7 @@ from datetime import date, datetime, time, timedelta
 from typing import Literal, Protocol
 
 from gats.backtest.costs import Charges, CostModel, Fill
+from gats.risk.engine import Exposure, OrderIntent
 from gats.strategy.base import (
     BarEvent,
     MarketEvent,
@@ -101,14 +102,18 @@ class Execution:
 
 
 class RiskGate(Protocol):
-    """The risk engine's veto (T6.4); returns why an order is refused, or None."""
+    """The risk engine's veto (gats.risk.engine.RiskEngine in real runs);
+    returns why an order is refused, or None."""
 
-    def refuse(self, order: Order, state: EngineState) -> str | None: ...
+    def check(self, order: OrderIntent, account: Exposure) -> str | None: ...
 
 
 class AllowAll:
-    def refuse(self, order: Order, state: EngineState) -> str | None:
+    def check(self, order: OrderIntent, account: Exposure) -> str | None:
         return None
+
+
+_SESSION_OPEN, _SESSION_CLOSE = time(9, 15), time(15, 30)
 
 
 @dataclass
@@ -121,6 +126,8 @@ class EngineState:
     day_low: dict[str, float] = field(default_factory=dict)
     bought_on: dict[str, date] = field(default_factory=dict)  # delivery buys, for T+1
     dp_paid: set[tuple[date, str]] = field(default_factory=set)
+    last_data_at: dict[str, datetime] = field(default_factory=dict)
+    day_start_equity: float = 0.0
     day: date | None = None
 
 
@@ -158,7 +165,7 @@ class Engine:
         self.config = config
         self.risk = risk or AllowAll()
         self.circuit_limits = circuit_limits
-        self.state = EngineState(cash=config.initial_cash)
+        self.state = EngineState(cash=config.initial_cash, day_start_equity=config.initial_cash)
         self.orders: list[Order] = []
         self.executions: list[Execution] = []
         self.duplicates = 0
@@ -210,6 +217,39 @@ class Engine:
             if usable_from <= day:
                 st.cash += amount
                 st.unsettled.remove((usable_from, amount))
+        st.day_start_equity = self._equity()
+
+    def _equity(self) -> float:
+        st = self.state
+        held = sum(
+            p.quantity * st.last_price.get(k, p.entry_price) for k, p in st.positions.items()
+        )
+        return st.cash + sum(amount for _, amount in st.unsettled) + held
+
+    def _exposure(self, now: datetime) -> Exposure:
+        """The account as the risk engine sees it at ``now``."""
+        st = self.state
+        buying: dict[str, float] = {}
+        this_second = 0
+        for order in self.orders:
+            if order.status == "rejected":
+                continue  # never left for the broker
+            if order.submitted_at.replace(microsecond=0) == now.replace(microsecond=0):
+                this_second += 1
+            if order.status == "working" and order.signal.side == "buy":
+                key = order.signal.instrument_key
+                buying[key] = buying.get(key, 0.0) + order.remaining * order.limit
+        return Exposure(
+            equity=self._equity(),
+            day_start_equity=st.day_start_equity,
+            positions={
+                k: p.quantity * st.last_price.get(k, p.entry_price) for k, p in st.positions.items()
+            },
+            buying=buying,
+            last_data_at=dict(st.last_data_at),
+            orders_this_second=this_second,
+            in_session=_SESSION_OPEN <= to_ist(now).time() < _SESSION_CLOSE,
+        )
 
     def _end_of_day(self) -> None:
         st = self.state
@@ -232,11 +272,7 @@ class Engine:
             sent_today = order.submitted_at < close
             if order.status == "working" and order.signal.product == "intraday" and sent_today:
                 order.status, order.note = "expired", "end of day"
-        held = sum(
-            p.quantity * st.last_price.get(k, p.entry_price) for k, p in st.positions.items()
-        )
-        pending = sum(amount for _, amount in st.unsettled)
-        self.equity[st.day] = st.cash + pending + held
+        self.equity[st.day] = self._equity()
 
     @staticmethod
     def _close_time(day: date) -> datetime:
@@ -270,7 +306,10 @@ class Engine:
             return self._reject(order_id, signal, now, "size rounds to zero shares")
         eligible = now + timedelta(seconds=cfg.latency_s)
         order = Order(order_id, signal, quantity, limit, now, eligible)
-        refusal = self.risk.refuse(order, st)
+        intent = OrderIntent(
+            signal.instrument_key, signal.side, signal.product, quantity, limit, signal.closes, now
+        )
+        refusal = self.risk.check(intent, self._exposure(now))
         self.orders.append(order)
         if refusal is not None:
             order.status, order.note = "rejected", f"risk: {refusal}"
@@ -326,6 +365,7 @@ class Engine:
                 continue
             self._try_fill(order, bar)
         st.last_price[key] = bar.close
+        st.last_data_at[key] = bar.closed_at
         st.day_high[key] = max(st.day_high.get(key, bar.high), bar.high)
         st.day_low[key] = min(st.day_low.get(key, bar.low), bar.low)
 

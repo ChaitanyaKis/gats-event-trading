@@ -115,6 +115,13 @@ are the documents behind it.
 | Broker (Upstox) | [upstox.com/brokerage-charges](https://upstox.com/brokerage-charges/) | Brokerage Rs 20/order delivery, min(Rs 20, 0.1%) intraday. DP Rs 20/scrip/day on delivery sells (CDSL 3.50 + Upstox 16.50). GST base: brokerage + transaction + IPFT (+ DP for delivery). NSE client rate 0.00322% for 2024-04-01 to 2024-09-30. The page contradicts itself on IPFT (Rs 0.10/lakh and Rs 0.01/crore) and still shows 0.00297% after March 2026: the NSE circulars win (SEBI's true-to-label rule passes exchange charges through unchanged). |
 | Broker calculator API | `GET https://api.upstox.com/v2/charges/brokerage?instrument_token=&quantity=&product=D\|I&transaction_type=BUY\|SELL&price=` (docs: get-brokerage) | DOCUMENTED, not probed (needs the token). `gats probe upstox-charges` compares five orders with the model; its replies become the reconciliation fixtures. The docs example rounds STT to the rupee (174.87 -> 175.0). |
 
+## Regulation the code relies on (read 2026-10-03)
+
+| Rule | Source | Says |
+|---|---|---|
+| Order rate for unregistered client algos | NSE circular [NSE/INVG/67858](https://nsearchives.nseindia.com/content/circulars/INVG67858.pdf) (2025-05-05), implementation standards for SEBI circular SEBI/HO/MIRSD/MIRSD-PoD/P/CIR/2025/0000013 (2025-02-04) | The Threshold Orders Per Second is "not exceeding 10 orders per second per exchange/segment", counted per calendar second on the broker's server; brokers may set a lower client limit and reject orders above it; faster algos must be registered with each exchange. `configs/risk.yaml` caps GATS at 5. |
+| Static IP for API trading | same circular; NSE FAQ of 2025-11-03 | API clients must give the broker a static IP ("required only in case of Tech savvy Investor using API for placing orders"). A HUMAN step before any live order (M8); market data through the Analytics Token is unaffected. |
+
 ## To verify (candidates; do not rely on these until probed)
 
 | Need | Candidate | Task |

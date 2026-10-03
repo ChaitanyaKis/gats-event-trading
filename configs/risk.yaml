@@ -1,0 +1,20 @@
+# Risk limits (T6.4): the risk engine's veto, shared by backtest, paper and live.
+#
+# These are conservative defaults, not a capital decision: the human sets
+# the real limits before any live pilot (G4). Changing a value changes the
+# version hash recorded with every run.
+version: risk-v1
+
+max_position_pct_equity: 0.10       # one position's notional, share of equity
+max_open_positions: 5               # held plus being bought
+max_daily_loss_pct_equity: 0.02     # today's realised + unrealised loss stops new entries
+max_symbol_notional: 200000         # rupees in one stock, held plus being bought
+min_median_turnover_rs: 10000000    # Rs 1 crore a day (20-session median), as in M3
+block_flags: [ASM, GSM, T2T]        # surveillance lists and trade-for-trade series
+unknown_flags: refuse               # no surveillance data: refuse (live); backtests before
+                                    # 2026-10 have none and set "allow"
+# The exchange threshold for unregistered client algos is 10 orders per
+# second per exchange (NSE/INVG/67858, 2025-05-05); stay well under it.
+max_orders_per_second: 5
+max_data_age_s: 120                 # in market hours, older prices halt new entries
+kill_switch_file: data/KILL         # if this file exists, no new entries

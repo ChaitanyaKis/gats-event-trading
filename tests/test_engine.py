@@ -19,14 +19,8 @@ from typing import Any, ClassVar
 import pytest
 
 from gats.backtest.costs import CostModel
-from gats.backtest.engine import (
-    BacktestResult,
-    Engine,
-    EngineConfig,
-    EngineState,
-    Execution,
-    Order,
-)
+from gats.backtest.engine import BacktestResult, Engine, EngineConfig, Execution
+from gats.risk.engine import Exposure, OrderIntent
 from gats.strategy.base import (
     BarEvent,
     Context,
@@ -223,8 +217,8 @@ def test_not_enough_cash_and_risk_vetoes() -> None:
     assert sum(e.quantity for e in buys(poor)) == 19  # what Rs 2,000 buys, with charges
 
     class NoNewPositions:
-        def refuse(self, order: Order, state: EngineState) -> str | None:
-            return None if order.signal.closes else "new positions are paused"
+        def check(self, order: OrderIntent, account: Exposure) -> str | None:
+            return None if order.closes else "new positions are paused"
 
     engine = Engine(
         Scripted({(A, at(10, 0)): [buy(quantity=10)]}),
