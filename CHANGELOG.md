@@ -1,7 +1,10 @@
 # Changelog
 
 ## Unreleased
-- **Event types:** every filing is typed by a versioned, rule-based
+- **Event-study engine:** `gats research event-study` runs the
+  pre-registered M3 study (`configs/studies/m3_event_study.yaml`) and writes
+  a per-event Parquet frame. It refuses an edited config or incomplete data.
+  New optional extra `research` (numpy, pyarrow, matplotlib).- **Event types:** every filing is typed by a versioned, rule-based
   taxonomy (`configs/event_taxonomy.yaml`): order wins, results, ratings,
   buybacks, bonus/splits, dividends, M&A, fund raises, pledges, management
   changes, litigation, insolvency, business updates, and procedural noise.

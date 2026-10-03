@@ -11,10 +11,11 @@ from __future__ import annotations
 from datetime import date, datetime, time
 from typing import Any
 
-from sqlalchemy import Connection, Row, func, select
+from sqlalchemy import Connection, Row, and_, func, select
 
 from gats.db.schema import (
     announcement_event_group,
+    announcement_event_types,
     announcement_security,
     announcements,
     eod_prices,
@@ -207,3 +208,47 @@ class AsOf:
             "trade_for_trade": bool(series) and series <= TRADE_FOR_TRADE_SERIES,
             "band_date": latest,
         }
+
+    def resolver(self) -> Resolver:
+        """The security master's identifier lookup (built once per clock)."""
+        if self._resolver is None:
+            self._resolver = Resolver.load(self._conn)
+        return self._resolver
+
+    def typed_filings(
+        self, start: datetime, end: datetime, taxonomy_version: str, source: str
+    ) -> list[Row[Any]]:
+        """Filings available in ``[start, end)`` (and by the clock) with their
+        event type under ``taxonomy_version`` and their linked security."""
+        a, t, link = announcements, announcement_event_types, announcement_security
+        return list(
+            self._conn.execute(
+                select(
+                    a.c.id,
+                    a.c.source,
+                    a.c.symbol,
+                    a.c.category,
+                    a.c.subject,
+                    a.c.event_ts,
+                    a.c.available_at,
+                    a.c.exch_disseminated_ts,
+                    t.c.event_type,
+                    link.c.security_id,
+                )
+                .select_from(
+                    a.join(
+                        t,
+                        and_(
+                            t.c.announcement_id == a.c.id, t.c.taxonomy_version == taxonomy_version
+                        ),
+                    ).outerjoin(link, link.c.announcement_id == a.c.id)
+                )
+                .where(
+                    a.c.source == source,
+                    a.c.available_at >= ensure_aware(start),
+                    a.c.available_at < ensure_aware(end),
+                    a.c.available_at <= self._as_of,
+                )
+                .order_by(a.c.available_at, a.c.id)
+            )
+        )

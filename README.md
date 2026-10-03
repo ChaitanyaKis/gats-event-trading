@@ -101,6 +101,8 @@ del .env                             # back to real endpoints
 | `gats refdata dedupe [--start D --end D]` | Group the same disclosure on BSE and NSE into one event |
 | `gats refdata coverage [--days N]` | Share of recent filings linked to a security; lists what is not |
 | `gats refdata resolve nse_symbol ZOMATO --date 2024-08-01` | What an identifier meant on a date |
+| `gats events classify` / `gats events coverage` | Type filings with `configs/event_taxonomy.yaml`; report what stays OTHER |
+| `gats research event-study` | Run the pre-registered M3 study (refuses an edited config or incomplete data) |
 | `gats inspect-bad [--limit N]` | Recent failed fetches and the payloads that failed to parse |
 | `gats version` | Installed version (check it after every update) |
 

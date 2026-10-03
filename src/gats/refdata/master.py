@@ -381,8 +381,12 @@ class Resolver:
         self._index: dict[tuple[str, str], list[tuple[date, date | None, int, datetime]]] = (
             defaultdict(list)
         )
+        self._by_security: dict[tuple[int, str], list[tuple[date, date | None, str]]] = defaultdict(
+            list
+        )
         for id_type, value, start, end, security_id, available_at in rows:
             self._index[(id_type, value.upper())].append((start, end, security_id, available_at))
+            self._by_security[(security_id, id_type)].append((start, end, value.upper()))
 
     @classmethod
     def load(cls, conn: Connection, build_id: int | None = None) -> Resolver:
@@ -400,6 +404,23 @@ class Resolver:
                     security_identifiers.c.available_at,
                 ).where(security_identifiers.c.last_build_id == build_id)
             )
+        )
+
+    def identifier(self, security_id: int, id_type: str, on: date) -> str | None:
+        """The security's ``id_type`` identifier valid on ``on`` (e.g. its NSE
+        symbol that day), or None."""
+        found = [
+            value
+            for start, end, value in self._by_security.get((security_id, id_type), [])
+            if start <= on and (end is None or on < end)
+        ]
+        return found[0] if len(found) == 1 else None
+
+    def windows_of(self, security_id: int, id_type: str) -> list[tuple[str, date, date | None]]:
+        """Every ``(value, valid_from, valid_to)`` of one identifier type."""
+        return sorted(
+            ((v, s, e) for s, e, v in self._by_security.get((security_id, id_type), [])),
+            key=lambda w: w[1],
         )
 
     def resolve(

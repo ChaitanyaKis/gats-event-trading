@@ -5,7 +5,7 @@ Claude Code updates this after every task. Newest log entry first.
 ## Status
 
 - **Version:** 0.2.0 · **Schema:** v5 · **Milestone:** M3 (M1 waits only on T1.6, HUMAN)
-- **Next up:** T3.3 Event-study engine (T3.0 plan is waiting for the human: item 3)
+- **Next up:** T3.4 Statistics & report (T3.0 plan is waiting for the human: item 3)
 
 ## Waiting on the human (HUMAN)
 
@@ -67,7 +67,7 @@ are PowerShell, run from `C:\Projects\GATS`.
 - [x] M1 core recorder (0.1.0 → 0.1.2)
 - [ ] M1 finishing: T1.1 ✅ · T1.2 ✅ · T1.3 ✅ · T1.4 ✅ · T1.5 ✅ · T1.6
 - [x] M2 Reference data & entity resolution (0.2.0): T2.1 ✅ · T2.2 ✅ · T2.3 ✅ · T2.4 ✅ · T2.5 ✅ · T2.6 ✅ · T2.7 ✅ · T2.8 ✅ · T2.9 ✅
-- [ ] M3 Event study (G1 kill test): T3.0 ⏳ (human) · T3.1 ⚠️ · T3.2 ✅ · T3.3 · T3.4 · T3.5
+- [ ] M3 Event study (G1 kill test): T3.0 ⏳ (human) · T3.1 ⚠️ · T3.2 ✅ · T3.3 ✅ · T3.4 · T3.5
 - [ ] M4 LLM extraction
 - [ ] M5 Intraday data & reaction curves (G1b)
 - [ ] M6 Backtester (G2)
@@ -85,6 +85,15 @@ are PowerShell, run from `C:\Projects\GATS`.
 ## Log
 
 - **2026-10-03:**
+  - T3.3 done. `gats.research.event_study` (entry = first regular open
+    strictly after availability; split-safe returns; market-adjusted vs Nifty
+    500; filters with one reason each; Parquet output) and `gats research
+    event-study`, which **refuses** an edited config (hash ≠ prereg) and
+    incomplete data (< 98% of sessions/filing days), and logs every run so a
+    repeat is flagged as a reproduction. Tests: planted +3% recovered,
+    placebo ≈ 0, each filter, bonus inside a window, and leak tests
+    (later availability never enters earlier; prices after an exit cannot
+    change a trade; unavailable filings invisible).
   - T3.2 done: `docs/research/M3_prereg.md` + `configs/studies/m3_event_study.yaml`
     (hash pinned in the prereg; the engine must refuse a mismatch) committed
     before any event return was computed. 5 confirmatory long hypotheses

@@ -14,6 +14,7 @@ from collections.abc import AsyncIterator
 from dataclasses import asdict, fields
 from datetime import date, time, timedelta
 from enum import StrEnum
+from pathlib import Path
 from typing import Annotated, Any
 
 import typer
@@ -35,6 +36,7 @@ from gats.health import Problem, evaluate
 from gats.ingest import Outcome, Services
 from gats.logging_setup import configure_logging
 from gats.net import FetchError, PoliteClient
+from gats.pit import AsOf
 from gats.rawstore import RawStore
 from gats.recorder import run_recorder
 from gats.refdata import dedupe, master
@@ -906,3 +908,73 @@ def events_coverage(
     typer.echo("  top OTHER patterns (filing level):")
     for source, cat, sub, n in filings.unmapped:
         typer.echo(f"    {n:6}  {source} | {cat} | {sub}")
+
+
+# --- research ---------------------------------------------------------------------------
+
+research_app = typer.Typer(no_args_is_help=True, help="Pre-registered studies.")
+app.add_typer(research_app, name="research")
+
+
+@research_app.command("event-study")
+def research_event_study(
+    config: Annotated[Path, typer.Option(help="Study config (YAML).")] = Path(
+        "configs/studies/m3_event_study.yaml"
+    ),
+    prereg: Annotated[
+        Path, typer.Option(help="Pre-registration recording the config's hash.")
+    ] = Path("docs/research/M3_prereg.md"),
+) -> None:
+    """Run the pre-registered event study on complete data (refuses otherwise)."""
+    from gats.research.event_study import filter_counts, run_event_study, to_records, write_parquet
+    from gats.research.runs import (
+        data_readiness,
+        database_fingerprint,
+        log_run,
+        previous_runs,
+        stamp,
+    )
+    from gats.research.study import RegistrationError, verify_registration
+
+    settings = _settings()
+    try:
+        cfg, digest = verify_registration(config, prereg)
+    except RegistrationError as exc:
+        typer.echo(f"REFUSED: {exc}")
+        raise typer.Exit(1) from exc
+    engine = make_engine(settings.resolved_db_url)
+    init_db(engine)
+    with engine.begin() as conn:
+        clock = AsOf(conn, utcnow())
+        readiness = data_readiness(conn, cfg, clock.calendar())
+        if not readiness.ready:
+            typer.echo("REFUSED: the data is not complete enough to spend the holdout on.")
+            for problem in readiness.problems():
+                typer.echo(f"  {problem}")
+            typer.echo(f"  first missing price sessions: {readiness.missing_eod[:5]}")
+            typer.echo(f"  first missing filing days: {readiness.missing_filing_days[:5]}")
+            typer.echo("  Run the T3.0 backfill commands (docs/PROGRESS.md), then retry.")
+            engine.dispose()
+            raise typer.Exit(1)
+        earlier = previous_runs(settings.data_dir, cfg.study, digest)
+        if earlier:
+            typer.echo(
+                f"WARNING: this exact design was already run {len(earlier)} time(s) "
+                f"(first {earlier[0]['run_id']}). This is a reproduction; nothing may be "
+                "tuned on its test-period results."
+            )
+        results = run_event_study(clock, cfg)
+        fingerprint = database_fingerprint(conn)
+    engine.dispose()
+    run_id = stamp()
+    out = settings.data_dir / "research" / cfg.study / run_id
+    rows = to_records(results, [x.name for x in cfg.exits])
+    write_parquet(rows, out / "events.parquet")
+    log_run(
+        settings.data_dir,
+        cfg.study,
+        {"run_id": run_id, "config_hash": digest, "events": len(rows), **fingerprint},
+    )
+    typer.echo(f"run {run_id}: {len(rows)} events -> {out / 'events.parquet'}")
+    for event_type, counts in sorted(filter_counts(results).items()):
+        typer.echo(f"  {event_type:20} {counts}")
