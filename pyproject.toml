@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "gats"
-version = "0.1.2"
-description = "GATS: event-driven research and trading platform for Indian equities. M1: 24/7 data recorder."
+version = "0.2.0"
+description = "GATS: event-driven research and trading platform for Indian equities."
 readme = "README.md"
 requires-python = ">=3.11"
 authors = [{ name = "Chaitanya", email = "chaitanyachode@gmail.com" }]

@@ -1,8 +1,9 @@
-# GATS: Data Recorder (Milestone M1)
+# GATS
 
 GATS is an event-driven research and trading platform for Indian equities.
-This repository currently ships **M1: the 24/7 data recorder**, the
-foundation every later milestone builds on. It records, point-in-time:
+It currently ships **M1, the 24/7 data recorder**, and **M2, reference data**
+(which company each filing is about, across NSE and BSE, point-in-time).
+It records, point-in-time:
 
 | Data | Source | Schedule | Why it matters |
 |---|---|---|---|
@@ -11,6 +12,16 @@ foundation every later milestone builds on. It records, point-in-time:
 | End-of-day prices + delivery % | NSE `sec_bhavdata_full` | after 18:00 IST, with 10-day catch-up | returns for event studies |
 | Price bands (circuit limits) | NSE `sec_list.csv` | daily after 08:00 IST | can we even trade it? |
 | Instrument list (symbol ↔ ISIN) | NSE `EQUITY_L.csv` | daily after 08:00 IST | entity resolution across exchanges |
+| Index closes (Nifty 50/500, sectors, …) | NSE `ind_close_all_DDMMYYYY.csv` | after 18:00 IST | benchmarks for abnormal returns |
+| BSE scrip master (scrip code ↔ ISIN) | BSE "List of Scrips" API | daily after 08:00 IST | ties BSE filings to securities |
+| Symbol changes, holidays | NSE `symbolchange.csv`, holiday API | daily | joins across renames; trading calendar |
+| Corporate actions | NSE corporate-actions API | daily, −30…+90 days | split/bonus-safe returns |
+| ASM / GSM surveillance lists | NSE report APIs | daily | what must never be traded |
+
+Derived every day: a **security master** (NSE rename chains and BSE scrip
+codes joined through ISINs), each filing's **security link**, and
+**cross-exchange events** (the same disclosure on BSE and NSE grouped, timed
+at the earliest dissemination).
 
 Price bands and the instrument list exist only as "today's file", so their
 history starts the day you start recording. **Start the recorder early.**
@@ -24,31 +35,21 @@ later. Tune with `GATS_ATTACHMENTS_*` in `.env`.
 
 ---
 
-## ⚠️ First run: verify the endpoints
+## Verified endpoints
 
-The exchange URLs and field names were written from knowledge of the
-exchanges' public websites but **could not be tested from the build
-environment** (no network access to NSE/BSE). The code is built for this:
-
-- every raw payload is stored before parsing (`data/raw/`),
-- `gats probe` shows exactly how the parser handles a real response,
-- `gats reparse` rebuilds the tables after a parser fix, without refetching.
-
-Before running the recorder, run each probe and check the output:
+Every source above was probed against the live sites; the findings (formats,
+quirks such as NSE serving the previous day's file on a holiday, or reporting
+today's symbol for old filings) are in [`docs/DATA_SOURCES.md`](docs/DATA_SOURCES.md),
+with trimmed real samples under `tests/fixtures/real/`. To re-check:
 
 ```powershell
-gats probe bse
-gats probe nse
-gats probe eod
-gats probe bands
-gats probe instruments
+gats doctor --network        # one request per source, parsed
+gats probe bse               # ... nse | eod | indices | bands | instruments
 ```
 
-For each one, check that the status is 200, `records` > 0, the field coverage
-is mostly full, and `unknown_fields` doesn't hide something important. If a
-probe fails, share the output and the saved sample in `data/probes/`: the
-parser gets fixed against the real payload. If a URL has moved, override it
-in `.env` (see `.env.example`); no code change is needed.
+If a probe fails, the payload is saved in `data/probes/` and the raw store;
+fix the parser, then `gats reparse <kind>`. A moved URL can be overridden in
+`.env` (see `.env.example`) without code changes.
 
 ---
 
@@ -86,13 +87,20 @@ del .env                             # back to real endpoints
 | Command | What it does |
 |---|---|
 | `gats init` | Create the data directory and database |
-| `gats probe {bse,nse,eod,bands,instruments} [--date YYYY-MM-DD]` | Fetch one sample, save it, report parser coverage |
+| `gats probe {bse,nse,eod,indices,bands,instruments} [--date YYYY-MM-DD]` | Fetch one sample, save it, report parser coverage |
 | `gats record` | Run all recorder jobs until stopped |
 | `gats status [--json]` | Problems in plain words first (recorder stopped, job failing > 30 min, BSE throttling, disk, reconcile backlog), then counts, latency, last fetch per job, heartbeat |
 | `gats doctor [--network]` | Health checks with a fix for each problem; `--network` makes one request per source. Exit code 1 on failure |
-| `gats backfill eod --start D --end D` | Load historical daily prices (resumable) |
+| `gats backfill eod --start D --end D [--no-weekends]` | Load historical daily prices (resumable; weekends included for special sessions) |
+| `gats backfill indices --start D --end D` | Load historical index closes (resumable) |
+| `gats backfill corporate-actions --start D --end D` | Load NSE corporate actions, a year per request |
 | `gats backfill announcements --source bse\|nse --start D --end D` | Load historical filings day by day (resumable) |
-| `gats reparse {bse_ann,nse_ann,nse_eod,nse_bands,nse_instruments}` | Re-run the current parser over stored raw payloads |
+| `gats reparse <kind>` | Re-run the current parser over stored raw payloads (`gats reparse --help` lists kinds) |
+| `gats refdata update` | Take today's snapshot of every reference file now (the recorder does it daily) |
+| `gats refdata build` | Rebuild the security master and link filings to it |
+| `gats refdata dedupe [--start D --end D]` | Group the same disclosure on BSE and NSE into one event |
+| `gats refdata coverage [--days N]` | Share of recent filings linked to a security; lists what is not |
+| `gats refdata resolve nse_symbol ZOMATO --date 2024-08-01` | What an identifier meant on a date |
 | `gats inspect-bad [--limit N]` | Recent failed fetches and the payloads that failed to parse |
 | `gats version` | Installed version (check it after every update) |
 
@@ -145,7 +153,7 @@ BSE terms and use the data for personal research.
 ## Development
 
 ```powershell
-pytest              # 103 tests, no network needed
+pytest              # ~285 tests, no network needed
 ruff check src tests scripts
 mypy                # strict
 ```
@@ -159,11 +167,13 @@ src/gats/
   net.py           polite HTTP client (throttle, retries, cookie warm-up)
   rawstore.py      content-addressed raw payload store
   db/              schema (bitemporal), engine, repository
-  sources/         pure parsers: bse, nse, nse_archives
+  sources/         pure parsers, one module per exchange file or API
   ingest.py        fetch → store raw → parse → write (shared by all commands)
+  refdata/         security master, symbol history, calendar, corporate
+                   actions, dedupe, surveillance, versioned snapshots
   recorder.py      24/7 job scheduler + heartbeat
-  pit.py           point-in-time reader for research
-  status.py, cli.py
+  pit.py           point-in-time reader for research (AsOf)
+  health.py, status.py, cli.py
 scripts/           mock exchange, smoke settings, Windows runner
 deploy/            systemd unit
 ```
@@ -177,7 +187,7 @@ type `/gats` in each session.
 
 ## Roadmap
 
-M1 recorder (done) → M2 reference data + entity resolution → M3 daily event
+M1 recorder (done) → M2 reference data + entity resolution (done) → M3 daily event
 study (the cheap test of whether an edge exists) → M4 LLM extraction →
 M5 minute data + reaction curves → M6 backtester → M7 paper trading →
 M8 live pilot (human-activated only). Details: [`docs/ROADMAP.md`](docs/ROADMAP.md);

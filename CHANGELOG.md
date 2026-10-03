@@ -1,6 +1,11 @@
 # Changelog
 
-## Unreleased
+## 0.2.0 (2026-10-03)
+M1 finishing (verified endpoints, real fixtures, health checks, two
+recorder bug fixes) and M2 (reference data). Schema v5, upgraded
+automatically; run `gats refdata update`, `gats refdata build` and
+`gats refdata dedupe` once after upgrading.
+
 - **Surveillance lists:** NSE's ASM (long and short term) and GSM lists are
   recorded daily (`nse_surveillance` job) as dated history;
   `AsOf.surveillance(symbol)` reports list stages, the GSM remark and

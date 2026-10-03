@@ -4,8 +4,8 @@ Claude Code updates this after every task. Newest log entry first.
 
 ## Status
 
-- **Version:** 0.1.2 · **Schema:** v4 · **Milestone:** M2 (M1 waits only on T1.6, HUMAN)
-- **Next up:** M2 wrap-up (0.2.0, learning notes) → M3 T3.0 backfill plan [ASK]
+- **Version:** 0.2.0 · **Schema:** v5 · **Milestone:** M3 (M1 waits only on T1.6, HUMAN)
+- **Next up:** T3.0 Backfill plan [ASK] (plan → Waiting on the human), then T3.1 Event taxonomy
 
 ## Waiting on the human (HUMAN)
 
@@ -36,7 +36,7 @@ are PowerShell, run from `C:\Projects\GATS`.
 
 - [x] M1 core recorder (0.1.0 → 0.1.2)
 - [ ] M1 finishing: T1.1 ✅ · T1.2 ✅ · T1.3 ✅ · T1.4 ✅ · T1.5 ✅ · T1.6
-- [ ] M2 Reference data & entity resolution: T2.1 ✅ · T2.2 ✅ · T2.3 ✅ · T2.4 ✅ · T2.5 ✅ · T2.6 ✅ · T2.7 ✅ · T2.8 ✅ · T2.9 ✅
+- [x] M2 Reference data & entity resolution (0.2.0): T2.1 ✅ · T2.2 ✅ · T2.3 ✅ · T2.4 ✅ · T2.5 ✅ · T2.6 ✅ · T2.7 ✅ · T2.8 ✅ · T2.9 ✅
 - [ ] M3 Event study (G1 kill test)
 - [ ] M4 LLM extraction
 - [ ] M5 Intraday data & reaction curves (G1b)
@@ -55,6 +55,8 @@ are PowerShell, run from `C:\Projects\GATS`.
 ## Log
 
 - **2026-10-03:**
+  - **M2 wrap-up:** version 0.2.0 (schema v5), README updated,
+    `docs/learning/M1.md` and `docs/learning/M2.md` written.
   - T2.9 done. NSE ASM (long/short term) and GSM APIs verified; versioned in
     `surveillance_versions` (truncation guard 50% for short lists; one file
     never closes the other's entries), daily job `nse_surveillance`.
