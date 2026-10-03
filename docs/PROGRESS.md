@@ -5,7 +5,7 @@ Claude Code updates this after every task. Newest log entry first.
 ## Status
 
 - **Version:** 0.2.0 · **Schema:** v8 · **Milestone:** M3 (M1 waits only on T1.6, HUMAN)
-- **Next up:** T4.7 revenue-source probe, then the M7 paper runtime; learning notes for the code-complete milestones. T5.3 waits for live latency (recorder, item 1). Waiting on the human: recorder (1), M3 run (3), labels (5), Upstox token (6)
+- **Next up:** T4.7 revenue ingestion and the point-in-time `amount_vs_revenue` feature (source verified), then its pre-registration; M7 paper runtime; learning notes. T5.3 waits for live latency (recorder, item 1). Waiting on the human: recorder (1), M3 run (3), labels (5), Upstox token (6)
 
 ## Waiting on the human (HUMAN)
 
@@ -112,6 +112,13 @@ are PowerShell, run from `C:\Projects\GATS`.
 ## Log
 
 - **2026-10-03:**
+  - T4.7 revenue source VERIFIED (ingestion next). NSE's results come in two regimes: the
+    legacy index (2005 → Oct-Dec 2024, where it stops) and the integrated-filing index (from
+    the March 2025 quarter). Both give dissemination times (so trailing revenue can be
+    point-in-time) and an XBRL whose `RevenueFromOperations` in context `OneD` is the
+    quarter's revenue in rupees. Trap found in the real file: the legacy `FourD` context
+    carries nine months under the quarter's dates. `gats.sources.nse_results`, four real
+    fixtures.
   - T5.3 pre-registered (`docs/research/M5_prereg.md`, config hash pinned, committed before
     any bar or intraday return existed) and coded. `gats.research.reaction`: entry at the
     first bar after availability + *measured* feed latency (p95 of our live recording; the

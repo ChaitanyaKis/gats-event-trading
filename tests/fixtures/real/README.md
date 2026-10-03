@@ -24,4 +24,8 @@ exchange data only; nothing personal.
 | `nse_gsm_2026-10-03.json` | `www.nseindia.com/api/reportGSM` | 2026-10-03 | 8 of 77 entries, incl. stages `0` and `LXII` |
 | `order_win_attachment.pdf` | Goldiam International order-win attachment (the same file on NSE and BSE), via `gats extract fetch` | 2026-10-03 | unchanged, 180 KB, 2 pages |
 | `upstox_NSE_instruments_2026-10-03.json` | `assets.upstox.com/market-quote/instruments/exchange/NSE.json.gz` | 2026-10-03 | 10 of 74,201 rows: RELIANCE, ETERNAL, TMPV, one BE, SM and SG each, Nifty 50 and Nifty 500, one NSE_FO and one NSE_COM row (skipped by the parser); un-gzipped |
+| `nse_financial_results_RELIANCE_2026-10-03.json` | `www.nseindia.com/api/corporates-financial-results?index=equities&symbol=RELIANCE&period=Quarterly` | 2026-10-03 | 8 of 130 rows: the six newest and the two oldest (no dissemination time, no XBRL) |
+| `nse_integrated_filing_RELIANCE_2026-10-03.json` | `www.nseindia.com/api/integrated-filing-results?index=equities&symbol=RELIANCE&period_ended=all&type=Integrated Filing- Financials` | 2026-10-03 | unchanged (12 rows) |
+| `nse_xbrl_results_RELIANCE_2024-12-31_consolidated.xml` | `nsearchives.nseindia.com/corporate/xbrl/INDAS_117297_1348248_16012025081520.xml` | 2026-10-03 | unchanged, 58 KB |
+| `nse_xbrl_integrated_RELIANCE_2026-06-30_consolidated.xml` | `nsearchives.nseindia.com/corporate/xbrl/INTEGRATED_FILING_INDAS_1695741_17072026075004_WEB.xml` | 2026-10-03 | unchanged, 46 KB |
 | `order_win_texts.json` | text of 9 real order-win attachments (HEC Infra, Ceinsys, NBCC, Veerhealth, Goldiam; T4.4 regressions: Laser Power, BCPL, HEG Advanced Materials, Vascon), extracted with pypdf | 2026-10-03 | whitespace-normalised full text |
