@@ -78,6 +78,16 @@ class TestResolver:
             SymbolWindow("LTM", date(2026, 2, 27), None),
         ]
 
+    def test_reused_symbol_starts_when_the_old_holder_left(self) -> None:
+        h = SymbolHistory([Change("OLDX", "NEWX", date(2025, 1, 1))])
+        # Seen before the rename: the old holder's whole chain.
+        assert h.windows("OLDX", date(2024, 6, 1)) == [
+            SymbolWindow("OLDX", None, date(2025, 1, 1)),
+            SymbolWindow("NEWX", date(2025, 1, 1), None),
+        ]
+        # Seen after it: a new listing that took over the free symbol.
+        assert h.windows("OLDX", date(2026, 6, 1)) == [SymbolWindow("OLDX", date(2025, 1, 1), None)]
+
     def test_self_maps_are_ignored(self) -> None:
         # INDINFR -> INTERISE plus INTERISE -> INTERISE on the same day.
         h = real_history()

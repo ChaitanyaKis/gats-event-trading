@@ -252,3 +252,44 @@ nse_symbol_changes = Table(
     Column("parser_version", String(32), nullable=False),
     Index(None, "new_symbol", "effective_date"),
 )
+
+# Security master (T2.3). Derived from the reference tables by
+# `gats refdata build`; rows are upserted and stamped with the build that
+# produced them, and lookups use the latest build only, so a rebuild never
+# needs to delete. security_id values are stable across builds.
+refdata_builds = Table(
+    "refdata_builds",
+    metadata,
+    Column("build_id", Integer, primary_key=True, autoincrement=True),
+    Column("built_at", UTCDateTime, nullable=False),
+    Column("stats", JSON, nullable=False, default=dict),
+)
+
+securities = Table(
+    "securities",
+    metadata,
+    Column("security_id", Integer, primary_key=True, autoincrement=True),
+    Column("primary_isin", String(12)),  # latest ISIN seen for the security
+    Column("name", Text),
+    Column("merged_into", Integer),  # set when two components were joined
+    Column("first_build_id", Integer, nullable=False),
+    Column("last_build_id", Integer, nullable=False),
+    Index(None, "primary_isin"),
+)
+
+# Identifier validity windows [valid_from, valid_to). OPEN_START (1900-01-01)
+# marks "before any recorded change"; valid_to NULL marks "still valid".
+security_identifiers = Table(
+    "security_identifiers",
+    metadata,
+    Column("id_type", String(16), primary_key=True),  # isin | nse_symbol | bse_scrip
+    Column("value", String(64), primary_key=True),
+    Column("valid_from", Date, primary_key=True),
+    Column("security_id", Integer, nullable=False),
+    Column("valid_to", Date),
+    Column("source", String(32), nullable=False),
+    # Earliest time the system could have tied this identifier to the security.
+    Column("available_at", UTCDateTime, nullable=False),
+    Column("last_build_id", Integer, nullable=False),
+    Index(None, "security_id"),
+)

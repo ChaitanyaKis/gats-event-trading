@@ -14,13 +14,15 @@ from typing import Any
 from sqlalchemy import Connection, Row, select
 
 from gats.db.schema import announcements, eod_prices, price_bands
-from gats.timeutil import ensure_aware
+from gats.refdata.master import Resolver
+from gats.timeutil import ensure_aware, to_ist
 
 
 class AsOf:
     def __init__(self, conn: Connection, as_of: datetime) -> None:
         self._conn = conn
         self._as_of = ensure_aware(as_of)
+        self._resolver: Resolver | None = None
 
     @property
     def as_of(self) -> datetime:
@@ -68,3 +70,23 @@ class AsOf:
             .order_by(price_bands.c.as_of_date.desc())
             .limit(1)
         ).first()
+
+    def security(
+        self, id_type: str, value: str, on: date | None = None, *, strict: bool = False
+    ) -> int | None:
+        """The security an identifier meant on ``on`` (default: the clock's IST date).
+
+        Asking about a date after the clock raises: tomorrow's symbol map is
+        future information. ``strict=True`` also hides identifier links the
+        system had not yet observed (live simulation). The default accepts the
+        documented backward extension of mappings first seen in today's
+        reference files, which research on backfilled history needs; those
+        links carry no price information.
+        """
+        today = to_ist(self._as_of).date()
+        day = on or today
+        if day > today:
+            raise ValueError(f"cannot resolve identifiers for {day}, after the clock ({today})")
+        if self._resolver is None:
+            self._resolver = Resolver.load(self._conn)
+        return self._resolver.resolve(id_type, value, day, known_at=self._as_of if strict else None)

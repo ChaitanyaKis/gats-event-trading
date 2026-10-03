@@ -1,7 +1,11 @@
 # Changelog
 
 ## Unreleased
-- **NSE symbol history:** a daily `nse_symbol_changes` job stores NSE's
+- **Security master:** `gats refdata build` joins NSE symbols (with their
+  rename history) and BSE scrip codes through ISINs into stable
+  `security_id`s with dated identifier windows; `gats refdata resolve
+  nse_symbol ZOMATO --date 2024-08-01` shows what an identifier meant on a
+  date. `gats refdata update` also snapshots NSE instruments and bands.- **NSE symbol history:** a daily `nse_symbol_changes` job stores NSE's
   symbol-change file (every rename since 1999); `gats.refdata.symbols`
   translates a symbol between dates (e.g. ETERNAL in 2024 → ZOMATO).
   `gats refdata update` now also fetches it.- **BSE scrip master:** a daily `bse_scrips` recorder job snapshots BSE's

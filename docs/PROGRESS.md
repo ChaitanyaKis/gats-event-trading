@@ -5,7 +5,7 @@ Claude Code updates this after every task. Newest log entry first.
 ## Status
 
 - **Version:** 0.1.2 · **Schema:** v4 · **Milestone:** M2 (M1 waits only on T1.6, HUMAN)
-- **Next up:** T2.3 Security master
+- **Next up:** T2.4 Link announcements
 
 ## Waiting on the human (HUMAN)
 
@@ -32,7 +32,7 @@ are PowerShell, run from `C:\Projects\GATS`.
 
 - [x] M1 core recorder (0.1.0 → 0.1.2)
 - [ ] M1 finishing: T1.1 ✅ · T1.2 ✅ · T1.3 ✅ · T1.4 ✅ · T1.5 ✅ · T1.6
-- [ ] M2 Reference data & entity resolution: T2.1 ✅ · T2.2 ✅ · T2.3 · T2.4 · T2.5 · T2.6 · T2.7 · T2.8 · T2.9
+- [ ] M2 Reference data & entity resolution: T2.1 ✅ · T2.2 ✅ · T2.3 ✅ · T2.4 · T2.5 · T2.6 · T2.7 · T2.8 · T2.9
 - [ ] M3 Event study (G1 kill test)
 - [ ] M4 LLM extraction
 - [ ] M5 Intraday data & reaction curves (G1b)
@@ -50,6 +50,18 @@ are PowerShell, run from `C:\Projects\GATS`.
 
 ## Log
 
+- **2026-10-03:**
+  - T2.3 done. Security master (`gats.refdata.master`): NSE rename chains +
+    BSE scrips joined by ISIN (union-find) → 11,006 securities, 23k
+    identifier windows; `gats refdata build|resolve`; `AsOf.security()`
+    (raises for dates after the clock; `strict=True` hides links not yet
+    observed). Rebuild keeps IDs stable (0 new on the 2nd build).
+  - Decisions: builds upsert rows stamped with `last_build_id` instead of
+    deleting; mappings first seen today are extended back to 1900 for
+    research on history (documented; `available_at` keeps the honest time);
+    a symbol seen with two ISINs and no recorded rename is one security (ISIN
+    change), while a symbol reused after a recorded rename-away is a new one.
+  - Recorder still not started on this machine (no heartbeat).
 - **2026-10-02:**
   - T2.2 done. `symbolchange.csv` verified (headerless, 1,065 changes since
     1999; effective date = first session under the new symbol, checked in

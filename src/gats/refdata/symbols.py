@@ -131,16 +131,37 @@ class SymbolHistory:
             current, day = change.new, change.effective
 
     def windows(self, symbol: str, known_on: date) -> list[SymbolWindow]:
-        """Every symbol of the listing that was ``symbol`` on ``known_on``, oldest first."""
-        first = self.symbol_on(symbol, known_on, date.min)
-        windows: list[SymbolWindow] = []
-        current, start = first, None
-        day = date.min
+        """Every symbol of the listing that was ``symbol`` on ``known_on``, oldest first.
+
+        Walks back and forward *from* ``known_on``, so a symbol reused after
+        an earlier holder renamed away is not glued onto that holder's chain:
+        the reuse starts on the day the earlier holder left the symbol.
+        """
+        starts: list[tuple[str, date]] = []  # (symbol, first session), newest first
+        current, day = symbol.upper(), known_on
         while True:
-            outs = [c for c in self._by_old.get(current, []) if c.effective > day]
-            if not outs:
-                windows.append(SymbolWindow(current, start, None))
-                return windows
-            change = min(outs, key=lambda c: c.effective)
-            windows.append(SymbolWindow(current, start, change.effective))
-            current, start, day = change.new, change.effective, change.effective
+            into = [c for c in self._by_new.get(current, []) if c.effective <= day]
+            if not into:
+                break
+            change = max(into, key=lambda c: c.effective)
+            starts.append((current, change.effective))
+            current, day = change.old, change.effective - timedelta(days=1)
+        # The oldest symbol starts when a previous holder renamed away from
+        # it, if one did; otherwise before any recorded change.
+        left = [c.effective for c in self._by_old.get(current, []) if c.effective <= day]
+        chain: list[tuple[str, date | None]] = [(current, max(left) if left else None)]
+        chain += list(reversed(starts))
+
+        current, day = symbol.upper(), known_on
+        while True:
+            out = [c for c in self._by_old.get(current, []) if c.effective > day]
+            if not out:
+                break
+            change = min(out, key=lambda c: c.effective)
+            chain.append((change.new, change.effective))
+            current, day = change.new, change.effective
+
+        return [
+            SymbolWindow(sym, start, chain[i + 1][1] if i + 1 < len(chain) else None)
+            for i, (sym, start) in enumerate(chain)
+        ]

@@ -23,13 +23,20 @@ from gats import __version__, ingest
 from gats.config import Settings
 from gats.db import repo
 from gats.db.engine import SchemaVersionError, init_db, make_engine
-from gats.db.schema import SCHEMA_VERSION, fetch_log, raw_documents
+from gats.db.schema import (
+    SCHEMA_VERSION,
+    fetch_log,
+    raw_documents,
+    securities,
+    security_identifiers,
+)
 from gats.health import Problem, evaluate
 from gats.ingest import Outcome, Services
 from gats.logging_setup import configure_logging
 from gats.net import FetchError, PoliteClient
 from gats.rawstore import RawStore
 from gats.recorder import run_recorder
+from gats.refdata import master
 from gats.refdata.coverage import bse_scrip_isin_coverage
 from gats.refdata.ingest import ingest_bse_scrips, ingest_nse_symbol_changes
 from gats.sources import bse, bse_scrips, nse, nse_archives, nse_symbols
@@ -584,19 +591,28 @@ def doctor(
 
 @refdata_app.command("update")
 def refdata_update() -> None:
-    """Take today's snapshot of the reference files now (the recorder does
-    this daily after 08:00 IST)."""
+    """Take today's snapshot of every reference file now: BSE scrips, NSE
+    symbol changes, NSE instruments and price bands (the recorder does this
+    daily after 08:00 IST)."""
     settings = _settings()
 
     async def main() -> list[tuple[str, Outcome]]:
         async with _services(settings) as svc:
-            return [
-                ("bse_scrips", await ingest_bse_scrips(svc, job="refdata_update")),
-                (
-                    "nse_symbol_changes",
-                    await ingest_nse_symbol_changes(svc, job="refdata_update"),
-                ),
+            job = "refdata_update"
+            results = [
+                ("bse_scrips", await ingest_bse_scrips(svc, job=job)),
+                ("nse_symbol_changes", await ingest_nse_symbol_changes(svc, job=job)),
             ]
+            for what in ("instruments", "bands"):
+                with svc.engine.begin() as conn:
+                    have = repo.has_rows_for_date(
+                        conn, ingest.snapshot_table_for(what), "as_of_date", ist_today()
+                    )
+                if not have:
+                    results.append(
+                        (f"nse_{what}", await ingest.ingest_snapshot(svc, what, job=job))
+                    )
+            return results
 
     results = asyncio.run(main())
     for label, outcome in results:
@@ -625,3 +641,58 @@ def refdata_coverage(
         )
         for ident, name, n in cov.unresolved:
             typer.echo(f"  unresolved {ident:>10}  {n:5} filings  {name}")
+
+
+@refdata_app.command("build")
+def refdata_build() -> None:
+    """Rebuild the security master from the reference tables (idempotent)."""
+    settings = _settings()
+    engine = make_engine(settings.resolved_db_url)
+    init_db(engine)
+    with engine.begin() as conn:
+        stats = master.build(conn, utcnow())
+    engine.dispose()
+    typer.echo(f"build {stats.build_id}: {stats.as_dict()}")
+    for conflict in stats.conflicts[:10]:
+        typer.echo(f"  conflict: {conflict}")
+
+
+class IdType(StrEnum):
+    isin = "isin"
+    nse_symbol = "nse_symbol"
+    bse_scrip = "bse_scrip"
+
+
+@refdata_app.command("resolve")
+def refdata_resolve(
+    id_type: Annotated[IdType, typer.Argument(help="Identifier type.")],
+    value: Annotated[str, typer.Argument(help="Identifier value.")],
+    on: Annotated[str | None, typer.Option("--date", help="YYYY-MM-DD (default today).")] = None,
+) -> None:
+    """Show which security an identifier meant on a date, with all its identifiers."""
+    settings = _settings(log_to_file=False)
+    engine = make_engine(settings.resolved_db_url)
+    init_db(engine)
+    day = _parse_day(on) if on else ist_today()
+    with engine.begin() as conn:
+        security_id = master.resolve(conn, id_type.value, value, day)
+        if security_id is None:
+            typer.echo(f"{id_type.value} {value} on {day}: unresolved (unknown or ambiguous)")
+            raise typer.Exit(1)
+        sec = conn.execute(select(securities).where(securities.c.security_id == security_id)).one()
+        idents = conn.execute(
+            select(security_identifiers)
+            .where(
+                security_identifiers.c.security_id == security_id,
+                security_identifiers.c.last_build_id == master.latest_build_id(conn),
+            )
+            .order_by(security_identifiers.c.id_type, security_identifiers.c.valid_from)
+        ).all()
+    engine.dispose()
+    typer.echo(f"security {security_id}: {sec.name} (ISIN {sec.primary_isin})")
+    for ident in idents:
+        start = "" if ident.valid_from == master.OPEN_START else str(ident.valid_from)
+        typer.echo(
+            f"  {ident.id_type:10} {ident.value:12} [{start or '...'}, {ident.valid_to or '...'})"
+            f"  source={ident.source}"
+        )
