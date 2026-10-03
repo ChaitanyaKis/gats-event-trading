@@ -102,6 +102,15 @@ class Execution:
     bar_volume: int = 0  # volume of the bar it filled in (0: closed at the end of the data)
 
 
+class Listener(Protocol):
+    """Told about every order and fill as it happens (the paper runtime
+    stores them; a backtest needs none)."""
+
+    def order(self, order: Order) -> None: ...
+
+    def execution(self, execution: Execution) -> None: ...
+
+
 class RiskGate(Protocol):
     """The risk engine's veto (gats.risk.engine.RiskEngine in real runs);
     returns why an order is refused, or None."""
@@ -162,12 +171,14 @@ class Engine:
         *,
         risk: RiskGate | None = None,
         circuit_limits: CircuitLimits | None = None,
+        listener: Listener | None = None,
     ) -> None:
         self.strategy = strategy
         self.costs = costs
         self.config = config
         self.risk = risk or AllowAll()
         self.circuit_limits = circuit_limits
+        self.listener = listener
         self.state = EngineState(cash=config.initial_cash, day_start_equity=config.initial_cash)
         self.orders: list[Order] = []
         self.executions: list[Execution] = []
@@ -177,18 +188,31 @@ class Engine:
     # --- the loop -----------------------------------------------------------------
 
     def run(self, items: Iterable[MarketEvent | BarEvent]) -> BacktestResult:
-        ordered = sorted(items, key=lambda i: (moment(i), isinstance(i, MarketEvent)))
-        for item in ordered:
-            now = moment(item)
-            self._new_day(to_ist(item.start if isinstance(item, BarEvent) else now).date())
-            if isinstance(item, BarEvent):
-                self._on_bar(item)
-                signals = self.strategy.on_bar(item, self._context(now))
-            else:
-                signals = self.strategy.on_event(item, self._context(now))
-            for signal in signals:
-                self._submit(signal, now)
+        """Replay ``items`` in the order they became known, then close out."""
+        for item in sorted(items, key=lambda i: (moment(i), isinstance(i, MarketEvent))):
+            self.step(item)
+        return self.finish()
+
+    def step(self, item: MarketEvent | BarEvent) -> None:
+        """Process one item at the moment it became known. A live runtime
+        calls this as items arrive; :meth:`run` calls it over a history. The
+        caller must pass items in time order."""
+        now = moment(item)
+        self._new_day(to_ist(item.start if isinstance(item, BarEvent) else now).date())
+        if isinstance(item, BarEvent):
+            self._on_bar(item)
+            signals = self.strategy.on_bar(item, self._context(now))
+        else:
+            signals = self.strategy.on_event(item, self._context(now))
+        for signal in signals:
+            self._submit(signal, now)
+
+    def finish(self) -> BacktestResult:
+        """Close the last day and return everything that happened."""
         self._end_of_day()
+        return self.result()
+
+    def result(self) -> BacktestResult:
         return BacktestResult(
             self.orders,
             self.executions,
@@ -315,10 +339,9 @@ class Engine:
             signal.instrument_key, signal.side, signal.product, quantity, limit, signal.closes, now
         )
         refusal = self.risk.check(intent, self._exposure(now))
-        self.orders.append(order)
         if refusal is not None:
             order.status, order.note = "rejected", f"risk: {refusal}"
-            return order
+        self._record(order)
         return order
 
     def _reject(self, order_id: int, signal: Signal, now: datetime, why: str) -> Order:
@@ -332,8 +355,13 @@ class Engine:
             status="rejected",
             note=why,
         )
-        self.orders.append(order)
+        self._record(order)
         return order
+
+    def _record(self, order: Order) -> None:
+        self.orders.append(order)
+        if self.listener is not None:
+            self.listener.order(order)
 
     # --- bars ---------------------------------------------------------------------
 
@@ -493,17 +521,18 @@ class Engine:
             order.filled += quantity
             if order.remaining == 0:
                 order.status = "filled"
-        self.executions.append(
-            Execution(
-                order.order_id if order else 0,
-                key,
-                side,
-                product,
-                quantity,
-                price,
-                at,
-                charges,
-                reason,
-                bar_volume,
-            )
+        execution = Execution(
+            order.order_id if order else 0,
+            key,
+            side,
+            product,
+            quantity,
+            price,
+            at,
+            charges,
+            reason,
+            bar_volume,
         )
+        self.executions.append(execution)
+        if self.listener is not None:
+            self.listener.execution(execution)

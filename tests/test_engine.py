@@ -302,3 +302,36 @@ def test_a_repeated_exit_is_not_sent_twice() -> None:
     result = run(Scripted(plan), day)
     assert result.duplicates == 1
     assert [o.signal.side for o in result.orders] == ["buy", "sell"]
+
+
+def test_stepping_live_equals_replaying_and_listeners_hear_everything() -> None:
+    """A live runtime feeds items one at a time; the result must be the replay's."""
+    strategy_path = ROOT / "configs" / "strategies" / "order_win_drift.yaml"
+    replayed = run(OrderWinDrift.from_yaml(strategy_path), golden_items())
+
+    class Heard:
+        def __init__(self) -> None:
+            self.orders: list[int] = []
+            self.fills: list[tuple[int, int]] = []
+
+        def order(self, order: Any) -> None:
+            self.orders.append(order.order_id)
+
+        def execution(self, execution: Execution) -> None:
+            self.fills.append((execution.order_id, execution.quantity))
+
+    heard = Heard()
+    live = Engine(
+        OrderWinDrift.from_yaml(strategy_path),
+        COSTS,
+        EngineConfig(initial_cash=1_000_000.0, notional_per_trade=100_000.0),
+        listener=heard,
+    )
+    from gats.backtest.engine import moment
+
+    for item in sorted(golden_items(), key=lambda i: (moment(i), isinstance(i, MarketEvent))):
+        live.step(item)
+    stepped = live.finish()
+    assert summary(stepped) == summary(replayed)
+    assert heard.orders == [o.order_id for o in stepped.orders]
+    assert heard.fills == [(e.order_id, e.quantity) for e in stepped.executions]
