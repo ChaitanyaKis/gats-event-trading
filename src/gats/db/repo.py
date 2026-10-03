@@ -20,6 +20,7 @@ from gats.db.schema import (
     eod_days,
     eod_prices,
     fetch_log,
+    index_eod,
     instrument_snapshots,
     price_bands,
     raw_documents,
@@ -463,6 +464,46 @@ def upsert_instruments(
     )
 
 
+def upsert_index_eod(
+    conn: Connection,
+    records: Sequence[Any],
+    *,
+    raw_doc_id: str,
+    parser_version: str,
+    available_at: datetime,
+) -> None:
+    rows = [
+        {
+            **asdict(r),
+            "available_at": available_at,
+            "raw_doc_id": raw_doc_id,
+            "parser_version": parser_version,
+        }
+        for r in records
+    ]
+    upsert(
+        conn,
+        index_eod,
+        rows,
+        ["trade_date", "index_name"],
+        [
+            "open",
+            "high",
+            "low",
+            "close",
+            "points_change",
+            "pct_change",
+            "volume",
+            "turnover_cr",
+            "pe",
+            "pb",
+            "div_yield",
+            "raw_doc_id",
+            "parser_version",
+        ],
+    )
+
+
 def has_rows_for_date(conn: Connection, table: Table, date_col: str, day: date) -> bool:
     column = table.c[date_col]
     return conn.execute(select(column).where(column == day).limit(1)).first() is not None
@@ -544,8 +585,9 @@ def backfill_summary(conn: Connection) -> dict[str, int]:
 EOD_CLOSED = frozenset({"not_published", "other_day"})
 
 
-def eod_day(conn: Connection, day: date) -> Row[Any] | None:
-    return conn.execute(select(eod_days).where(eod_days.c.trade_date == day)).first()
+def eod_day(conn: Connection, day: date, table: Table = eod_days) -> Row[Any] | None:
+    """The bookkeeping row for ``day`` in ``eod_days`` (or ``index_days``)."""
+    return conn.execute(select(table).where(table.c.trade_date == day)).first()
 
 
 def record_eod_day(
@@ -557,16 +599,15 @@ def record_eod_day(
     now: datetime,
     file_date: date | None = None,
     http_status: int | None = None,
+    table: Table = eod_days,
 ) -> None:
     attempts = (
-        conn.execute(
-            select(eod_days.c.attempts).where(eod_days.c.trade_date == day)
-        ).scalar_one_or_none()
+        conn.execute(select(table.c.attempts).where(table.c.trade_date == day)).scalar_one_or_none()
         or 0
     ) + 1
     upsert(
         conn,
-        eod_days,
+        table,
         [
             {
                 "trade_date": day,

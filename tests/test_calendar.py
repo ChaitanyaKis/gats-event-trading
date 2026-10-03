@@ -11,6 +11,7 @@ import respx
 from sqlalchemy import Engine
 
 from gats.db import repo
+from gats.db.schema import index_days
 from gats.ingest import Services
 from gats.pit import AsOf
 from gats.rawstore import RawStore
@@ -161,6 +162,16 @@ class TestLoad:
                 file_date=date(2026, 10, 1),
                 http_status=200,
             )
+            # The index file is evidence too: here a Sunday special session.
+            repo.record_eod_day(
+                conn,
+                date(2026, 2, 1),
+                status="loaded",
+                n_records=167,
+                now=now,
+                http_status=200,
+                table=index_days,
+            )
             from gats.db.schema import market_holidays
 
             conn.execute(
@@ -181,7 +192,8 @@ class TestLoad:
         # final, so the weekday rule applies... unless the holiday list says so.
         assert cal.is_trading_day(date(2026, 10, 2))
         assert not cal.is_trading_day(date(2026, 10, 20))
-        assert cal.coverage == (date(2026, 10, 1), date(2026, 10, 1))
+        assert cal.is_special_session(date(2026, 2, 1))
+        assert cal.coverage == (date(2026, 2, 1), date(2026, 10, 1))
 
 
 class TestHolidaySource:

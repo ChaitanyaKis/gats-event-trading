@@ -2,11 +2,13 @@
 
 Which dates had a session, in order of evidence:
 
-1. **EOD data.** A date with prices (or an ``eod_days`` row ``loaded``) was a
-   session. This also finds special sessions: Diwali Muhurat trading and
-   weekend budget-day sessions publish their own files.
-2. **Closed.** ``eod_days`` says the file 404'd or held another day's rows
-   (NSE's answer for weekday holidays), or NSE's holiday list names the date.
+1. **Daily files.** A date with stock or index closes (``eod_days`` /
+   ``index_days`` row ``loaded``) was a session. This also finds special
+   sessions: Diwali Muhurat trading and weekend budget-day sessions publish
+   their own files.
+2. **Closed.** The day's file 404'd or held another day's rows (NSE's
+   bhavcopy answer for weekday holidays; the index file simply 404s), or
+   NSE's holiday list names the date.
 3. **Weekends** are closed.
 4. Any other weekday is assumed open (future dates, dates before the data).
 
@@ -29,7 +31,7 @@ from datetime import date, datetime, time, timedelta
 from sqlalchemy import Connection, select
 
 from gats.db import repo
-from gats.db.schema import eod_days, eod_prices, market_holidays
+from gats.db.schema import eod_days, eod_prices, index_days, market_holidays
 from gats.timeutil import ensure_aware, ist_datetime, ist_today, to_ist
 
 # Searching further than this for the next session means the calendar has a
@@ -71,11 +73,12 @@ class TradingCalendar:
         today = today or ist_today()
         sessions = set(conn.execute(select(eod_prices.c.trade_date).distinct()).scalars())
         closed: set[date] = set()
-        for row in conn.execute(select(eod_days)):
-            if row.status == "loaded":
-                sessions.add(row.trade_date)
-            elif repo.eod_day_settled(row, today=today, max_attempts=max_attempts):
-                closed.add(row.trade_date)
+        for table in (eod_days, index_days):
+            for row in conn.execute(select(table)):
+                if row.status == "loaded":
+                    sessions.add(row.trade_date)
+                elif repo.eod_day_settled(row, today=today, max_attempts=max_attempts):
+                    closed.add(row.trade_date)
         holidays = {
             r.holiday_date: r.description
             for r in conn.execute(

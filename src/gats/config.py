@@ -54,6 +54,9 @@ class Settings(BaseSettings):
     nse_eod_url_template: str = (
         "https://nsearchives.nseindia.com/products/content/sec_bhavdata_full_{ddmmyyyy}.csv"
     )
+    nse_index_close_url_template: str = (
+        "https://nsearchives.nseindia.com/content/indices/ind_close_all_{ddmmyyyy}.csv"
+    )
     nse_bands_url: str = "https://nsearchives.nseindia.com/content/equities/sec_list.csv"
     nse_instruments_url: str = "https://nsearchives.nseindia.com/content/equities/EQUITY_L.csv"
     nse_symbol_changes_url: str = (
@@ -152,6 +155,7 @@ class Settings(BaseSettings):
     eod_catchup_days: int = Field(default=10, ge=1)
     eod_publish_after_ist: time = time(18, 0)
     eod_max_missing_attempts: int = Field(default=3, ge=1)
+    indices_enabled: bool = True  # NSE index closes, same schedule as EOD
 
     snapshots_enabled: bool = True
     refdata_enabled: bool = True  # BSE scrip list (and later reference files)

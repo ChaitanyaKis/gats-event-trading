@@ -45,7 +45,15 @@ from gats.refdata.ingest import (
     ingest_nse_symbol_changes,
 )
 from gats.refdata.link import link_pending
-from gats.sources import bse, bse_scrips, nse, nse_archives, nse_holidays, nse_symbols
+from gats.sources import (
+    bse,
+    bse_scrips,
+    nse,
+    nse_archives,
+    nse_holidays,
+    nse_indices,
+    nse_symbols,
+)
 from gats.sources._util import preview
 from gats.sources.models import PayloadError
 from gats.status import build_report
@@ -64,6 +72,7 @@ class ProbeTarget(StrEnum):
     bse = "bse"
     nse = "nse"
     eod = "eod"
+    indices = "indices"
     bands = "bands"
     instruments = "instruments"
 
@@ -79,6 +88,7 @@ class ReparseKind(StrEnum):
     nse_eod = nse_archives.EOD_KIND
     nse_bands = nse_archives.BANDS_KIND
     nse_instruments = nse_archives.INSTRUMENTS_KIND
+    nse_indices = nse_indices.KIND
     bse_scrips = bse_scrips.KIND
     nse_symbol_changes = nse_symbols.KIND
     nse_holidays = nse_holidays.KIND
@@ -214,15 +224,13 @@ def probe(
                         headers=nse.request_headers(s.nse_announcements_referer),
                         warmup_url=s.nse_home_url,
                     )
-                elif target is ProbeTarget.eod:
+                elif target in (ProbeTarget.eod, ProbeTarget.indices):
                     if when is None:
                         the_day = ist_today() - timedelta(days=1)
                         while the_day.weekday() >= 5:
                             the_day -= timedelta(days=1)
-                    got = await svc.client.get(
-                        nse_archives.eod_url(s.nse_eod_url_template, the_day),
-                        warmup_url=s.nse_home_url,
-                    )
+                    spec = ingest.EOD_FILE if target is ProbeTarget.eod else ingest.INDEX_FILE
+                    got = await svc.client.get(spec.url(s, the_day), warmup_url=s.nse_home_url)
                 elif target is ProbeTarget.bands:
                     got = await svc.client.get(s.nse_bands_url, warmup_url=s.nse_home_url)
                 else:
@@ -266,6 +274,8 @@ def probe(
                     parsed = nse.parse_announcements(got.content)
                 elif target is ProbeTarget.eod:
                     parsed = nse_archives.parse_eod(got.content, trade_date=the_day)
+                elif target is ProbeTarget.indices:
+                    parsed = nse_indices.parse_index_close(got.content, trade_date=the_day)
                 elif target is ProbeTarget.bands:
                     parsed = nse_archives.parse_bands(got.content)
                 else:
@@ -332,6 +342,41 @@ def backfill_announcements(
         typer.echo("interrupted; rerun the same command to resume")
 
 
+def _backfill_daily(
+    spec: ingest.DailyFile, first: date, last: date, *, weekends: bool, job: str
+) -> None:
+    settings = _settings()
+
+    async def main() -> None:
+        async with _services(settings) as svc:
+            today = ist_today()
+            for day in daterange(first, last):
+                if day.weekday() >= 5 and not weekends:
+                    continue
+                with svc.engine.begin() as conn:
+                    if repo.has_rows_for_date(
+                        conn, spec.rows_table, "trade_date", day
+                    ) or repo.eod_day_settled(
+                        repo.eod_day(conn, day, spec.days_table),
+                        today=today,
+                        max_attempts=settings.eod_max_missing_attempts,
+                    ):
+                        continue
+                outcome = await ingest.ingest_daily_file(svc, spec, day, job=job, mode="backfill")
+                if outcome.http_status == 404:
+                    label = f"{day} (no file: weekend, holiday or not published)"
+                elif outcome.ok and outcome.n_records == 0:
+                    label = f"{day} (no session: the file holds another day)"
+                else:
+                    label = str(day)
+                _print_outcome(label, outcome)
+
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        typer.echo("interrupted; rerun the same command to resume")
+
+
 @backfill_app.command("eod")
 def backfill_eod(
     start: Annotated[str, typer.Option(help="First day, YYYY-MM-DD.")],
@@ -344,37 +389,27 @@ def backfill_eod(
 
     Days already loaded, or already known to have had no session, are skipped.
     """
-    settings = _settings()
-    first, last = _parse_day(start), _parse_day(end)
+    _backfill_daily(
+        ingest.EOD_FILE, _parse_day(start), _parse_day(end), weekends=weekends, job="backfill_eod"
+    )
 
-    async def main() -> None:
-        async with _services(settings) as svc:
-            today = ist_today()
-            for day in daterange(first, last):
-                if day.weekday() >= 5 and not weekends:
-                    continue
-                with svc.engine.begin() as conn:
-                    if repo.has_rows_for_date(
-                        conn, ingest.snapshot_table_for("eod"), "trade_date", day
-                    ) or repo.eod_day_settled(
-                        repo.eod_day(conn, day),
-                        today=today,
-                        max_attempts=settings.eod_max_missing_attempts,
-                    ):
-                        continue
-                outcome = await ingest.ingest_eod_day(svc, day, job="backfill_eod", mode="backfill")
-                if outcome.http_status == 404:
-                    label = f"{day} (no file: weekend or not published)"
-                elif outcome.ok and outcome.n_records == 0:
-                    label = f"{day} (no session: the file holds another day)"
-                else:
-                    label = str(day)
-                _print_outcome(label, outcome)
 
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        typer.echo("interrupted; rerun the same command to resume")
+@backfill_app.command("indices")
+def backfill_indices(
+    start: Annotated[str, typer.Option(help="First day, YYYY-MM-DD.")],
+    end: Annotated[str, typer.Option(help="Last day, YYYY-MM-DD.")],
+    weekends: Annotated[
+        bool, typer.Option(help="Also ask for weekends (special sessions publish files).")
+    ] = True,
+) -> None:
+    """Load historical NSE index closes (resumable)."""
+    _backfill_daily(
+        ingest.INDEX_FILE,
+        _parse_day(start),
+        _parse_day(end),
+        weekends=weekends,
+        job="backfill_indices",
+    )
 
 
 # --- reparse & status ----------------------------------------------------------------

@@ -1,7 +1,10 @@
 # Changelog
 
 ## Unreleased
-- **Trading calendar:** `gats.refdata.calendar` knows NSE sessions from the
+- **Benchmark indices:** daily closes of every NSE index (Nifty 50/500,
+  Midcap 150, Smallcap 250, sectors, …) via a new recorder job
+  `nse_indices`, `gats backfill indices --start … --end …` and
+  `gats probe indices`.- **Trading calendar:** `gats.refdata.calendar` knows NSE sessions from the
   EOD files, NSE's holiday list (new daily `nse_holidays` job) and weekends,
   flags special sessions, and gives `next_session_open(t)`,
   `session_open/close(d)` and `shift(d, n)` in IST hours 09:15–15:30

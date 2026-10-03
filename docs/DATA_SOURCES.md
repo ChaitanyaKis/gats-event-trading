@@ -16,6 +16,7 @@ new source gets a row here before code depends on it.
 | NSE name changes | `https://nsearchives.nseindia.com/content/equities/namechange.csv` | VERIFIED 2026-10-02 (not used yet) | Header `NCH_SYMBOL, NCH_PREV_NAME, NCH_NEW_NAME, NCH_DT`; 2,328 rows. |
 | NSE holiday list | `https://www.nseindia.com/api/holiday-master?type=trading` (warm-up cookies; Referer the holidays page) | VERIFIED 2026-10-03 | JSON keyed by segment (`CM` = equity cash, `FO`, `CD`, `COM`, …); entries `tradingDate` (`DD-Mon-YYYY`), `weekDay`, `description`, `morning_session`/`evening_session` (null on every 2026 row, even `Diwali Laxmi Pujan*`), `Sr_no`. **Current year only** (20 CM dates for 2026, weekend holidays included). |
 | NSE market hours | `https://www.nseindia.com/static/market-data/market-timings` | VERIFIED 2026-10-03 | Capital market: pre-open 09:00–09:08, normal market **09:15–15:30**, closing session 15:40–16:00. Used as `GATS_SESSION_OPEN_IST` / `_CLOSE_IST`. |
+| NSE index closes | `https://nsearchives.nseindia.com/content/indices/ind_close_all_DDMMYYYY.csv` | VERIFIED 2026-10-03 | Header `Index Name, Index Date (DD-MM-YYYY), Open/High/Low/Closing Index Value, Points Change, Change(%), Volume, Turnover (Rs. Cr.), P/E, P/B, Div Yield`; `-` = not applicable. 167 indices (2026-10-01), 79 (2019-10-01). Weekends and holidays **404** (cleaner than the bhavcopy); special sessions have files. Files back to ≥ 2012 but names change (`S&P CNX Nifty` 2012 → `CNX Nifty` 2013 → `Nifty 50`); benchmark names stable 2019→2026. One year backfilled: 248 sessions 2025-10-01 → 2026-10-01. Real sample: `tests/fixtures/real/nse_indices_2026-10-01.csv`. |
 | BSE attachments | `https://www.bseindia.com/xml-data/corpfiling/AttachLive/<file>` (falls back to `AttachHis/`) | VERIFIED 2026-09-26 | PDFs, often large. Stored per the attachment policy. |
 
 ## BSE announcements
@@ -98,7 +99,6 @@ new source gets a row here before code depends on it.
 
 | Need | Candidate | Task |
 |---|---|---|
-| Index closes | `nsearchives.nseindia.com/content/indices/ind_close_all_DDMMYYYY.csv` | T2.7 |
 | ASM/GSM lists | NSE/BSE surveillance pages | T2.9 |
 | Minute candles | Upstox historical candle API v3 (1-min since Jan 2022, per its docs) | T5.1 |
 

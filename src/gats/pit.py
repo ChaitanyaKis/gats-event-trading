@@ -18,6 +18,7 @@ from gats.db.schema import (
     announcement_security,
     announcements,
     eod_prices,
+    index_eod,
     price_bands,
 )
 from gats.refdata.calendar import TradingCalendar
@@ -140,3 +141,12 @@ class AsOf:
                 self._conn, open_ist=open_ist, close_ist=close_ist
             )
         return self._calendar
+
+    def index_history(self, index_name: str, start: date | None = None) -> list[Row[Any]]:
+        """Daily closes of one NSE index (name as published, e.g. "Nifty 500")."""
+        query = select(index_eod).where(
+            index_eod.c.index_name == index_name, index_eod.c.available_at <= self._as_of
+        )
+        if start is not None:
+            query = query.where(index_eod.c.trade_date >= start)
+        return list(self._conn.execute(query.order_by(index_eod.c.trade_date)))

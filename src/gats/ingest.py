@@ -10,16 +10,31 @@ from dataclasses import dataclass, field
 from datetime import date, datetime
 from typing import Any
 
-from sqlalchemy import Engine
+from sqlalchemy import Connection, Engine, Table
 
 from gats.config import Settings
 from gats.db import repo
 from gats.db.repo import IngestMode
-from gats.db.schema import eod_prices, instrument_snapshots, price_bands
+from gats.db.schema import (
+    eod_days,
+    eod_prices,
+    index_days,
+    index_eod,
+    instrument_snapshots,
+    price_bands,
+)
 from gats.logging_setup import kv
 from gats.net import Fetched, FetchError, PoliteClient
 from gats.rawstore import RawStore
-from gats.sources import bse, bse_scrips, nse, nse_archives, nse_holidays, nse_symbols
+from gats.sources import (
+    bse,
+    bse_scrips,
+    nse,
+    nse_archives,
+    nse_holidays,
+    nse_indices,
+    nse_symbols,
+)
 from gats.sources.models import AnnouncementRecord, ParseResult, PayloadError
 from gats.timeutil import ist_datetime, ist_today, utcnow
 
@@ -414,9 +429,69 @@ def log_transport_failure(svc: Services, job: str, url: str, outcome: Outcome) -
 # --- daily files -----------------------------------------------------------------
 
 
-async def ingest_eod_day(svc: Services, day: date, *, job: str, mode: IngestMode) -> Outcome:
+@dataclass(frozen=True)
+class DailyFile:
+    """A file NSE publishes once per session under a date-stamped URL.
+
+    The EOD bhavcopy and the index-close file share one ingest path: fetch,
+    keep the raw bytes, parse with a date check, write, and record the day's
+    outcome (loaded / not published / another day's copy) so retries stop.
+    """
+
+    kind: str
+    source: str
+    parser_version: str
+    url: Callable[[Settings, date], str]
+    parse: Callable[[bytes, date], ParseResult[Any]]
+    write: Callable[[Connection, Sequence[Any], str, str, datetime], None]
+    days_table: Table
+    rows_table: Table
+
+
+def _write_eod(
+    conn: Connection, records: Sequence[Any], doc_id: str, version: str, available_at: datetime
+) -> None:
+    repo.upsert_eod(
+        conn, records, raw_doc_id=doc_id, parser_version=version, available_at=available_at
+    )
+
+
+def _write_index(
+    conn: Connection, records: Sequence[Any], doc_id: str, version: str, available_at: datetime
+) -> None:
+    repo.upsert_index_eod(
+        conn, records, raw_doc_id=doc_id, parser_version=version, available_at=available_at
+    )
+
+
+EOD_FILE = DailyFile(
+    kind=nse_archives.EOD_KIND,
+    source=nse_archives.SOURCE,
+    parser_version=nse_archives.EOD_PARSER_VERSION,
+    url=lambda s, day: nse_archives.eod_url(s.nse_eod_url_template, day),
+    parse=lambda payload, day: nse_archives.parse_eod(payload, trade_date=day),
+    write=_write_eod,
+    days_table=eod_days,
+    rows_table=eod_prices,
+)
+
+INDEX_FILE = DailyFile(
+    kind=nse_indices.KIND,
+    source=nse_indices.SOURCE,
+    parser_version=nse_indices.PARSER_VERSION,
+    url=lambda s, day: nse_indices.url(s.nse_index_close_url_template, day),
+    parse=lambda payload, day: nse_indices.parse_index_close(payload, trade_date=day),
+    write=_write_index,
+    days_table=index_days,
+    rows_table=index_eod,
+)
+
+
+async def ingest_daily_file(
+    svc: Services, spec: DailyFile, day: date, *, job: str, mode: IngestMode
+) -> Outcome:
     settings = svc.settings
-    url = nse_archives.eod_url(settings.nse_eod_url_template, day)
+    url = spec.url(settings, day)
     got = await safe_get(svc, url, warmup_url=settings.nse_home_url)
     if isinstance(got, Outcome):
         log_transport_failure(svc, job, url, got)
@@ -435,7 +510,13 @@ async def ingest_eod_day(svc: Services, day: date, *, job: str, mode: IngestMode
                 n_records=0,
             )
             repo.record_eod_day(
-                conn, day, status="not_published", n_records=0, now=svc.clock(), http_status=404
+                conn,
+                day,
+                status="not_published",
+                n_records=0,
+                now=svc.clock(),
+                http_status=404,
+                table=spec.days_table,
             )
         return Outcome(ok=True, http_status=404, meta={"not_found": True})
     if not got.ok:
@@ -456,23 +537,24 @@ async def ingest_eod_day(svc: Services, day: date, *, job: str, mode: IngestMode
         ist_datetime(day, settings.eod_publish_after_ist) if mode == "backfill" else got.fetched_at
     )
     try:
-        parsed = nse_archives.parse_eod(got.content, trade_date=day)
+        parsed = spec.parse(got.content, day)
     except PayloadError as exc:
         return record_bad_payload(
             svc,
             got,
             job=job,
-            kind=nse_archives.EOD_KIND,
+            kind=spec.kind,
             error=exc,
             meta={"trade_date": day.isoformat()},
+            source=spec.source,
         )
     with svc.engine.begin() as conn:
         doc_id = repo.save_raw(
             conn,
             svc.store,
             got.content,
-            kind=nse_archives.EOD_KIND,
-            source=nse_archives.SOURCE,
+            kind=spec.kind,
+            source=spec.source,
             url=url,
             content_type=got.content_type,
             fetched_at=got.fetched_at,
@@ -482,13 +564,7 @@ async def ingest_eod_day(svc: Services, day: date, *, job: str, mode: IngestMode
                 "available_at": available_at.isoformat(),
             },
         )
-        repo.upsert_eod(
-            conn,
-            parsed.records,
-            raw_doc_id=doc_id,
-            parser_version=nse_archives.EOD_PARSER_VERSION,
-            available_at=available_at,
-        )
+        spec.write(conn, parsed.records, doc_id, spec.parser_version, available_at)
         dates_seen = [date.fromisoformat(d) for d in parsed.meta.get("dates_seen", [])]
         if parsed.records:
             repo.record_eod_day(
@@ -498,9 +574,10 @@ async def ingest_eod_day(svc: Services, day: date, *, job: str, mode: IngestMode
                 n_records=len(parsed.records),
                 now=svc.clock(),
                 http_status=got.status,
+                table=spec.days_table,
             )
         else:
-            # A weekday holiday's URL serves the previous session's file.
+            # NSE serves another session's file under a holiday's EOD URL.
             repo.record_eod_day(
                 conn,
                 day,
@@ -509,6 +586,7 @@ async def ingest_eod_day(svc: Services, day: date, *, job: str, mode: IngestMode
                 now=svc.clock(),
                 file_date=max(dates_seen) if dates_seen else None,
                 http_status=got.status,
+                table=spec.days_table,
             )
         repo.log_fetch(
             conn,
@@ -529,6 +607,14 @@ async def ingest_eod_day(svc: Services, day: date, *, job: str, mode: IngestMode
         http_status=got.status,
         warnings=parsed.warnings,
     )
+
+
+async def ingest_eod_day(svc: Services, day: date, *, job: str, mode: IngestMode) -> Outcome:
+    return await ingest_daily_file(svc, EOD_FILE, day, job=job, mode=mode)
+
+
+async def ingest_index_day(svc: Services, day: date, *, job: str, mode: IngestMode) -> Outcome:
+    return await ingest_daily_file(svc, INDEX_FILE, day, job=job, mode=mode)
 
 
 def record_bad_payload(
@@ -668,7 +754,12 @@ async def ingest_snapshot(svc: Services, what: str, *, job: str) -> Outcome:
 
 
 def snapshot_table_for(what: str) -> Any:
-    return {"bands": price_bands, "instruments": instrument_snapshots, "eod": eod_prices}[what]
+    return {
+        "bands": price_bands,
+        "instruments": instrument_snapshots,
+        "eod": eod_prices,
+        "indices": index_eod,
+    }[what]
 
 
 # --- attachments -----------------------------------------------------------------
@@ -818,6 +909,17 @@ def reparse_kind(svc: Services, kind: str) -> dict[str, int]:
                         available_at=_meta_available_at(meta, doc.first_fetched_at),
                     )
                     stats["updated"] += len(eod.records)
+                elif kind == nse_indices.KIND:
+                    day = date.fromisoformat(meta["trade_date"])
+                    idx = nse_indices.parse_index_close(payload, trade_date=day)
+                    repo.upsert_index_eod(
+                        conn,
+                        idx.records,
+                        raw_doc_id=doc.doc_id,
+                        parser_version=nse_indices.PARSER_VERSION,
+                        available_at=_meta_available_at(meta, doc.first_fetched_at),
+                    )
+                    stats["updated"] += len(idx.records)
                 elif kind == nse_archives.BANDS_KIND:
                     bands = nse_archives.parse_bands(payload)
                     repo.upsert_bands(

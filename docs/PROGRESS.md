@@ -5,7 +5,7 @@ Claude Code updates this after every task. Newest log entry first.
 ## Status
 
 - **Version:** 0.1.2 · **Schema:** v4 · **Milestone:** M2 (M1 waits only on T1.6, HUMAN)
-- **Next up:** T2.7 Benchmark indices
+- **Next up:** T2.8 Corporate-action safety
 
 ## Waiting on the human (HUMAN)
 
@@ -36,7 +36,7 @@ are PowerShell, run from `C:\Projects\GATS`.
 
 - [x] M1 core recorder (0.1.0 → 0.1.2)
 - [ ] M1 finishing: T1.1 ✅ · T1.2 ✅ · T1.3 ✅ · T1.4 ✅ · T1.5 ✅ · T1.6
-- [ ] M2 Reference data & entity resolution: T2.1 ✅ · T2.2 ✅ · T2.3 ✅ · T2.4 ✅ · T2.5 ✅ · T2.6 ✅ · T2.7 · T2.8 · T2.9
+- [ ] M2 Reference data & entity resolution: T2.1 ✅ · T2.2 ✅ · T2.3 ✅ · T2.4 ✅ · T2.5 ✅ · T2.6 ✅ · T2.7 ✅ · T2.8 · T2.9
 - [ ] M3 Event study (G1 kill test)
 - [ ] M4 LLM extraction
 - [ ] M5 Intraday data & reaction curves (G1b)
@@ -55,6 +55,16 @@ are PowerShell, run from `C:\Projects\GATS`.
 ## Log
 
 - **2026-10-03:**
+  - T2.7 done. Index closes verified and stored (`index_eod`, `index_days`,
+    recorder job `nse_indices`, `gats backfill indices`, `gats probe indices`,
+    `AsOf.index_history()`). The EOD and index paths now share one generic
+    daily-file ingest. One year backfilled (2025-10-01 → 2026-10-02): 248
+    sessions; no 2026 listed holiday has a file; the 4 unlisted weekday
+    closures are real 2025 holidays; both special sessions present. The
+    calendar now also uses index-file evidence.
+  - Final 30-day numbers after the full BSE backfill + reparse: linking NSE
+    100% (17,084), BSE 99.6% (37,042/37,187); BSE scrip→ISIN 99.5%;
+    14,369 cross-exchange pairs (≈84% of NSE filings have a BSE twin).
   - T2.6 done. `gats.refdata.calendar.TradingCalendar` (EOD evidence →
     closed days → NSE holiday list → weekends; special sessions = sessions
     on weekends/holidays, skipped by `next_session_open`); `AsOf.calendar()`.

@@ -125,11 +125,15 @@ class NseAnnouncementsJob(_PollingAnnouncementsJob):
 
 @dataclass
 class EodJob:
+    """A once-per-session NSE file (the EOD bhavcopy by default; pass
+    ``spec=ingest.INDEX_FILE`` for index closes)."""
+
     name: str
     check_s: float
     catchup_days: int
     publish_after: time
     max_missing_attempts: int
+    spec: ingest.DailyFile = ingest.EOD_FILE
 
     def interval_s(self, now: datetime) -> float:
         return self.check_s
@@ -146,12 +150,12 @@ class EodJob:
                 day = today - timedelta(days=back)
                 if day == today and ist_time_of_day(now) < self.publish_after:
                     continue
-                if repo.has_rows_for_date(
-                    conn, ingest.snapshot_table_for("eod"), "trade_date", day
-                ):
+                if repo.has_rows_for_date(conn, self.spec.rows_table, "trade_date", day):
                     continue
                 if repo.eod_day_settled(
-                    repo.eod_day(conn, day), today=today, max_attempts=self.max_missing_attempts
+                    repo.eod_day(conn, day, self.spec.days_table),
+                    today=today,
+                    max_attempts=self.max_missing_attempts,
                 ):
                     continue  # holiday or weekend: stop asking
                 days.append(day)
@@ -160,7 +164,9 @@ class EodJob:
     async def run_once(self, svc: Services) -> Outcome:
         total = Outcome(ok=True)
         for day in self.due_days(svc):
-            total.merge(await ingest.ingest_eod_day(svc, day, job=self.name, mode="live"))
+            total.merge(
+                await ingest.ingest_daily_file(svc, self.spec, day, job=self.name, mode="live")
+            )
         return total
 
 
@@ -377,6 +383,17 @@ def build_jobs(svc: Services) -> list[Job]:
                 s.eod_catchup_days,
                 s.eod_publish_after_ist,
                 s.eod_max_missing_attempts,
+            )
+        )
+    if s.indices_enabled:
+        jobs.append(
+            EodJob(
+                "nse_indices",
+                s.eod_check_s,
+                s.eod_catchup_days,
+                s.eod_publish_after_ist,
+                s.eod_max_missing_attempts,
+                spec=ingest.INDEX_FILE,
             )
         )
     if s.snapshots_enabled:

@@ -350,3 +350,39 @@ market_holidays = Table(
     Column("raw_doc_id", String(64), ForeignKey("raw_documents.doc_id"), nullable=False),
     Column("parser_version", String(32), nullable=False),
 )
+
+# NSE index closes (T2.7), one row per index per session.
+index_eod = Table(
+    "index_eod",
+    metadata,
+    Column("trade_date", Date, primary_key=True),
+    Column("index_name", String(128), primary_key=True),
+    Column("open", Float),
+    Column("high", Float),
+    Column("low", Float),
+    Column("close", Float),
+    Column("points_change", Float),
+    Column("pct_change", Float),
+    Column("volume", BigInteger),
+    Column("turnover_cr", Float),
+    Column("pe", Float),
+    Column("pb", Float),
+    Column("div_yield", Float),
+    Column("available_at", UTCDateTime, nullable=False),
+    Column("raw_doc_id", String(64), ForeignKey("raw_documents.doc_id"), nullable=False),
+    Column("parser_version", String(32), nullable=False),
+    Index(None, "index_name", "trade_date"),
+)
+
+# Same bookkeeping as eod_days, for the index file (which 404s on holidays).
+index_days = Table(
+    "index_days",
+    metadata,
+    Column("trade_date", Date, primary_key=True),
+    Column("status", String(16), nullable=False),
+    Column("attempts", Integer, nullable=False),
+    Column("n_records", Integer, nullable=False),
+    Column("file_date", Date),
+    Column("http_status", Integer),
+    Column("updated_at", UTCDateTime, nullable=False),
+)

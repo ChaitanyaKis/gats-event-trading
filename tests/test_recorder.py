@@ -71,6 +71,7 @@ def test_build_jobs_respects_flags(svc: Services) -> None:
         "bse_announcements",
         "nse_announcements",
         "nse_eod",
+        "nse_indices",
         "nse_bands",
         "nse_instruments",
         "attachments",
