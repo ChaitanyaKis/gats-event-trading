@@ -140,6 +140,13 @@ def _segments(text: str) -> dict[str, list[str]]:
     return values
 
 
+def annexure_fields(text: str) -> dict[str, str]:
+    """The annexure's fields as the rules read them (best label each), for
+    showing to a person checking an extraction."""
+    flat = " ".join(text.split())
+    return {name: values[0] for name, values in _segments(flat).items()}
+
+
 def _clean(value: str) -> str:
     value = _FRAGMENTS.sub(" ", value).replace("•", " ")  # bullet points
     value = re.sub(r"\s+", " ", value).strip(_STRIP)

@@ -101,6 +101,98 @@ async def svc(
     await client.aclose()
 
 
+# --- typed filings with text (M4 extraction tests) -------------------------------
+
+TAXONOMY_TEST = "taxonomy-test"
+SEEDED_AT = datetime(2026, 10, 3, tzinfo=UTC)
+
+
+def seed_filings(engine: Engine, store: RawStore, filings: list[dict[str, Any]]) -> list[int]:
+    """Typed filings whose attachments are downloaded and read. Each dict
+    needs ``text``; optional: ``source`` (NSE), ``event_ts``, ``pdf`` (equal
+    bytes = one shared document), ``event_type`` (ORDER_WIN), ``symbol``,
+    ``details``, ``needs_ocr``. Returns the announcement ids, in order."""
+    from sqlalchemy import func, select
+
+    from gats.db import repo
+    from gats.db.schema import announcement_event_types, announcements, document_texts
+    from gats.extract.pdf_text import EXTRACTOR, EXTRACTOR_VERSION
+    from gats.sources.models import AnnouncementRecord
+
+    ids = []
+    with engine.begin() as conn:
+        first = int(conn.execute(select(func.count()).select_from(announcements)).scalar_one())
+        page = repo.save_raw(
+            conn, store, b"page", kind="t", source="NSE", url="u", content_type=None,
+            fetched_at=SEEDED_AT,
+        )  # fmt: skip
+        for n, spec in enumerate(filings, start=first):
+            event_ts = spec.get("event_ts", SEEDED_AT)
+            record = AnnouncementRecord(
+                source=spec.get("source", "NSE"),
+                source_ann_id=str(n),
+                symbol=spec.get("symbol", f"CO{n}"),
+                scrip_code=None,
+                isin=None,
+                company_name=f"Company {n}",
+                category="Bagging/Receiving of orders/contracts",
+                subcategory=None,
+                subject=None,
+                details=spec.get("details"),
+                attachment_url=f"https://example.com/{n}.pdf",
+                exch_submitted_ts=None,
+                exch_disseminated_ts=event_ts,
+                event_ts=event_ts,
+            )
+            repo.insert_announcements(
+                conn, [record], raw_doc_id=page, parser_version="v", mode="backfill",
+                fetched_at=SEEDED_AT, now=SEEDED_AT,
+            )  # fmt: skip
+            ann_id = int(
+                conn.execute(
+                    select(announcements.c.id).where(
+                        announcements.c.source == record.source,
+                        announcements.c.source_ann_id == record.source_ann_id,
+                    )
+                ).scalar_one()
+            )
+            doc = repo.save_raw(
+                conn, store, spec.get("pdf", f"pdf {n}".encode()), kind="attachment",
+                source=record.source, url=record.attachment_url or "",
+                content_type="application/pdf", fetched_at=SEEDED_AT,
+            )  # fmt: skip
+            repo.mark_attachment(conn, ann_id, status="done", doc_id=doc)
+            conn.execute(
+                announcement_event_types.insert().values(
+                    announcement_id=ann_id,
+                    taxonomy_version=TAXONOMY_TEST,
+                    event_type=spec.get("event_type", "ORDER_WIN"),
+                    rule_no=0,
+                    classified_at=SEEDED_AT,
+                )
+            )
+            repo.insert_ignore(
+                conn,
+                document_texts,
+                [
+                    {
+                        "doc_id": doc,
+                        "extractor": EXTRACTOR,
+                        "extractor_version": EXTRACTOR_VERSION,
+                        "pages": 1,
+                        "chars": len(spec["text"]),
+                        "needs_ocr": spec.get("needs_ocr", False),
+                        "error": None,
+                        "text": spec["text"],
+                        "extracted_at": SEEDED_AT,
+                    }
+                ],
+                ["doc_id", "extractor", "extractor_version"],
+            )
+            ids.append(ann_id)
+    return ids
+
+
 # --- payload builders ------------------------------------------------------------
 
 

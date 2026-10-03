@@ -3,6 +3,13 @@
 ## Unreleased
 Schema v6 (new tables only), upgraded automatically.
 
+- **Labelling:** `gats label sample` draws a held-out, stratified evaluation
+  sample of order wins (committed before labelling); `gats label review`
+  shows each filing's summary, every amount in context and one proposal
+  (the rules' or the LLM's, at random) to accept, edit or reject, saving
+  each decision to `labels/order_win_v1.jsonl` at once; `gats label
+  prepare` asks the LLM in advance; `gats label stats` reports progress.
+  Guide: `labels/README.md`.
 - **Order facts:** `gats extract run --type ORDER_WIN --mode rules|llm|cascade`
   extracts each order win's value, counterparty, domestic/export, duration
   and repeat flag into `extractions`. Rules read SEBI's disclosure annexure

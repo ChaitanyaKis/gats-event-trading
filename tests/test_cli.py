@@ -63,3 +63,20 @@ def test_inspect_bad_on_empty_database() -> None:
 def test_status_shows_backfill_line() -> None:
     result = runner.invoke(app, ["status"])
     assert "backfill days: none" in result.stdout
+
+
+def test_redirected_windows_console_prints_rather_than_crashes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import io
+    import sys
+
+    from gats.cli import _main
+
+    raw = io.BytesIO()
+    cp1252 = io.TextIOWrapper(raw, encoding="cp1252")
+    monkeypatch.setattr(sys, "stdout", cp1252)
+    _main()
+    print("order of ₹72.77 crore")
+    cp1252.flush()
+    assert raw.getvalue().rstrip(b"\r\n") == b"order of ?72.77 crore"

@@ -15,11 +15,8 @@ import pytest
 import respx
 from sqlalchemy import select
 
-from gats.db import repo
 from gats.db.schema import (
-    announcement_event_types,
     announcements,
-    document_texts,
     extractions,
     llm_extractions,
 )
@@ -32,14 +29,13 @@ from gats.extract.llm import (
     prompt_hash,
     validate_response,
 )
-from gats.extract.pdf_text import EXTRACTOR, EXTRACTOR_VERSION
 from gats.extract.rules import RULES_VERSION
 from gats.ingest import Services
-from gats.sources.models import AnnouncementRecord
+from tests.conftest import TAXONOMY_TEST, seed_filings
 
 NOW = datetime(2026, 10, 3, tzinfo=UTC)
 FILED = date(2026, 9, 15)
-TAXONOMY = "taxonomy-test"
+TAXONOMY = TAXONOMY_TEST
 
 TEXT = (
     "Dear Sir, the Company has received a work order from Bharat Heavy Electricals Limited "
@@ -183,87 +179,7 @@ class TestCall:
 
 def seed(svc: Services, texts: list[str]) -> list[int]:
     """One ORDER_WIN filing per text, its attachment downloaded and read."""
-    records = [
-        AnnouncementRecord(
-            source="NSE",
-            source_ann_id=str(i),
-            symbol=f"CO{i}",
-            scrip_code=None,
-            isin=None,
-            company_name=f"Company {i}",
-            category="Bagging/Receiving of orders/contracts",
-            subcategory=None,
-            subject=None,
-            details=None,
-            attachment_url=f"https://example.com/{i}.pdf",
-            exch_submitted_ts=None,
-            exch_disseminated_ts=NOW,
-            event_ts=NOW,
-        )
-        for i in range(len(texts))
-    ]
-    ids = []
-    with svc.engine.begin() as conn:
-        page = repo.save_raw(
-            conn,
-            svc.store,
-            b"page",
-            kind="t",
-            source="NSE",
-            url="u",
-            content_type=None,
-            fetched_at=NOW,
-        )
-        repo.insert_announcements(
-            conn,
-            records,
-            raw_doc_id=page,
-            parser_version="v",
-            mode="backfill",
-            fetched_at=NOW,
-            now=NOW,
-        )
-        for i, text in enumerate(texts):
-            ann_id = int(
-                conn.execute(
-                    select(announcements.c.id).where(announcements.c.source_ann_id == str(i))
-                ).scalar_one()
-            )
-            doc = repo.save_raw(
-                conn,
-                svc.store,
-                f"pdf {i}".encode(),
-                kind="attachment",
-                source="NSE",
-                url=f"https://example.com/{i}.pdf",
-                content_type="application/pdf",
-                fetched_at=NOW,
-            )
-            repo.mark_attachment(conn, ann_id, status="done", doc_id=doc)
-            conn.execute(
-                announcement_event_types.insert().values(
-                    announcement_id=ann_id,
-                    taxonomy_version=TAXONOMY,
-                    event_type="ORDER_WIN",
-                    rule_no=0,
-                    classified_at=NOW,
-                )
-            )
-            conn.execute(
-                document_texts.insert().values(
-                    doc_id=doc,
-                    extractor=EXTRACTOR,
-                    extractor_version=EXTRACTOR_VERSION,
-                    pages=1,
-                    chars=len(text),
-                    needs_ocr=False,
-                    error=None,
-                    text=text,
-                    extracted_at=NOW,
-                )
-            )
-            ids.append(ann_id)
-    return ids
+    return seed_filings(svc.engine, svc.store, [{"text": text} for text in texts])
 
 
 def by_filing(svc: Services, version_prefix: str) -> dict[int, Any]:

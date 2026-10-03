@@ -5,7 +5,7 @@ Claude Code updates this after every task. Newest log entry first.
 ## Status
 
 - **Version:** 0.2.0 · **Schema:** v6 · **Milestone:** M3 (M1 waits only on T1.6, HUMAN)
-- **Next up:** M4 T4.5 Labelled eval set: build `gats label`, then the human labels (M3's real run waits on the T3.0 backfill: item 3)
+- **Next up:** M5 T5.1 prep (verify Upstox docs, list the keys) and M6 T6.1 Cost model. Waiting on the human: M3's real run (item 3), T4.6 metrics (labels, item 5)
 
 ## Waiting on the human (HUMAN)
 
@@ -58,6 +58,18 @@ are PowerShell, run from `C:\Projects\GATS`.
    `docs/research/dedupe_v1_review.md` (each shows both exchanges' text) and
    tell Claude if any verdict looks wrong.
 
+5. **T4.5 Label at least 300 order wins** (about 30 s each, any number of
+   sittings). Ollama must be running: the LLM proposes half of the items.
+   Read `labels\README.md` first (one page).
+   ```powershell
+   cd C:\Projects\GATS
+   .venv\Scripts\gats label prepare   # optional, ~1.5 h unattended: the LLM answers every item in advance (resumable)
+   .venv\Scripts\gats label review    # label; q stops, run it again to continue
+   .venv\Scripts\gats label stats     # progress; the target is 300 labelled
+   ```
+   Then type `/gats`: Claude commits `labels\order_win_v1.jsonl` and runs
+   T4.6 (rules vs LLM vs cascade).
+
 ## Blocked
 
 (none)
@@ -68,7 +80,7 @@ are PowerShell, run from `C:\Projects\GATS`.
 - [ ] M1 finishing: T1.1 ✅ · T1.2 ✅ · T1.3 ✅ · T1.4 ✅ · T1.5 ✅ · T1.6
 - [x] M2 Reference data & entity resolution (0.2.0): T2.1 ✅ · T2.2 ✅ · T2.3 ✅ · T2.4 ✅ · T2.5 ✅ · T2.6 ✅ · T2.7 ✅ · T2.8 ✅ · T2.9 ✅
 - [ ] M3 Event study (G1 kill test): T3.0 ⏳ (human) · T3.1 ⚠️ · T3.2 ✅ · T3.3 ✅ · T3.4 ✅ (code; real run ⏳ backfill) · T3.5 ⏳ (gate, after the real run)
-- [ ] M4 LLM extraction (infrastructure for ORDER_WIN; scope confirmed at G1): T4.1 ✅ · T4.2 ✅ · T4.3 ✅ · T4.4 ✅ · T4.5 · T4.6 · T4.7
+- [ ] M4 LLM extraction (infrastructure for ORDER_WIN; scope confirmed at G1): T4.1 ✅ · T4.2 ✅ · T4.3 ✅ · T4.4 ✅ · T4.5 ⏳ (code ✅; labels: human) · T4.6 · T4.7
 - [ ] M5 Intraday data & reaction curves (G1b)
 - [ ] M6 Backtester (G2)
 - [ ] M7 Paper trading (G3)
@@ -85,6 +97,12 @@ are PowerShell, run from `C:\Projects\GATS`.
 ## Log
 
 - **2026-10-03:**
+  - T4.5 code done (labelling is the human's, item 5). Held-out sample: NSE filings of
+    2026-06-01 → 2026-08-31 (backfilled and read for this; 570 documents, 562 with text), never seen while the
+    rules were built. `gats label sample` drew 330 of 562 documents, stratified by
+    how the rules read them (annexure 211, sentence 59, none 60), and the file is committed before
+    labelling. Each item shows the rules' or the LLM's proposal at random (half each),
+    so T4.6 can measure anchoring. `gats label review` saves every decision at once.
   - T4.4 done. `gats extract run --mode rules|llm|cascade`: Ollama `/api/chat` with a
     JSON-schema `format` (temperature 0, seed 0). The model copies text; code derives the
     numbers and rejects bad JSON, schema misses, amounts not in the filing and sub-lakh

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import io
 import json
 import os
 import platform
@@ -77,6 +78,19 @@ from gats.timeutil import daterange, ist_datetime, ist_today, to_ist, utcnow
 app = typer.Typer(
     add_completion=False, no_args_is_help=True, help="GATS data recorder and research tools."
 )
+
+
+@app.callback()
+def _main() -> None:
+    """GATS data recorder and research tools."""
+    # Filing text holds characters (the rupee sign, smart quotes) that a
+    # redirected Windows console (cp1252) cannot encode: print '?' instead
+    # of crashing halfway through a command.
+    for stream in (sys.stdout, sys.stderr):
+        if isinstance(stream, io.TextIOWrapper):
+            stream.reconfigure(errors="replace")
+
+
 backfill_app = typer.Typer(no_args_is_help=True, help="Load historical data.")
 app.add_typer(backfill_app, name="backfill")
 refdata_app = typer.Typer(no_args_is_help=True, help="Reference data: security master.")
@@ -1177,3 +1191,185 @@ def extract_run(
     if stats.stopped:
         typer.echo(f"  stopped early: {stats.stopped}", err=True)
         raise typer.Exit(1)
+
+
+label_app = typer.Typer(no_args_is_help=True, help="Human labels for extraction (T4.5).")
+app.add_typer(label_app, name="label")
+
+_SAMPLE = Path("labels/order_win_v1.sample.json")
+_LABELS = Path("labels/order_win_v1.jsonl")
+SamplePath = Annotated[Path, typer.Option("--sample", help="Sample file.")]
+LabelsPath = Annotated[Path, typer.Option("--labels", help="Labels file (JSONL).")]
+
+
+class _TyperUI:
+    """The labelling prompts, in the terminal."""
+
+    def show(self, text: str = "", *, highlight: bool = False) -> None:
+        typer.echo(typer.style(text, bold=True) if highlight else text)
+
+    def ask(self, prompt: str, *, default: str | None = None) -> str:
+        return str(typer.prompt(prompt, default=default, show_default=default is not None))
+
+    def page(self, text: str) -> None:
+        import textwrap
+
+        typer.echo("-" * 30 + " full text " + "-" * 30)
+        typer.echo(textwrap.fill(" ".join(text.split()), width=100))
+        typer.echo("-" * 71)
+
+
+def _load_sample(path: Path) -> Any:
+    from gats.extract.labels import Sample
+
+    if not path.exists():
+        typer.echo(f"no sample at {path} (run from the repo root; draw one with gats label sample)")
+        raise typer.Exit(1)
+    return Sample.load(path)
+
+
+@label_app.command("sample")
+def label_sample(
+    start: Annotated[str, typer.Option(help="First filing day, YYYY-MM-DD.")],
+    end: Annotated[str, typer.Option(help="Last filing day, YYYY-MM-DD.")],
+    n: Annotated[int, typer.Option(help="Items to draw: the labels needed plus spares.")] = 330,
+    seed: Annotated[int, typer.Option(help="Random seed (recorded in the file).")] = 20261003,
+    source: Annotated[str, typer.Option(help="BSE, NSE or ALL.")] = "NSE",
+    out: SamplePath = _SAMPLE,
+    force: Annotated[bool, typer.Option(help="Replace an existing sample.")] = False,
+) -> None:
+    """Draw the evaluation sample, once, before anyone labels (commit the file)."""
+    from gats.extract.labels import draw_sample
+
+    if out.exists() and not force:
+        typer.echo(
+            f"{out} exists. Labels refer to it; redraw (--force) only before labelling starts."
+        )
+        raise typer.Exit(1)
+    settings = _settings()
+    tax = _taxonomy(settings)
+    engine = make_engine(settings.resolved_db_url)
+    init_db(engine)
+    with engine.begin() as conn:
+        sample = draw_sample(
+            conn,
+            name=out.name.removesuffix(".sample.json"),
+            event_type="ORDER_WIN",
+            taxonomy_version=tax.version,
+            start=_parse_day(start),
+            end=_parse_day(end),
+            source=None if source.upper() == "ALL" else source.upper(),
+            n=n,
+            seed=seed,
+            now=utcnow(),
+        )
+    sample.save(out)
+    typer.echo(f"{len(sample.items)} of {sample.population} filings -> {out}")
+    for stratum, counts in sample.strata.items():
+        typer.echo(f"  {stratum}: {counts['sample']} of {counts['population']}")
+
+
+@label_app.command("prepare")
+def label_prepare(
+    sample_path: SamplePath = _SAMPLE,
+    limit: Annotated[int, typer.Option(help="Most filings in this run.")] = 10_000,
+) -> None:
+    """Ask the LLM about every sampled filing before review (cached and
+    resumable; about 18 s a filing on a laptop GPU)."""
+    from gats.extract.cascade import run_extractions
+    from gats.extract.labels import resolve
+
+    sample = _load_sample(sample_path)
+    settings = _settings()
+
+    async def main() -> Any:
+        async with _services(settings) as svc:
+            with svc.engine.begin() as conn:
+                ids = resolve(conn, sample)
+            return await run_extractions(
+                svc,
+                event_type=sample.event_type,
+                taxonomy_version=sample.taxonomy_version,
+                mode="llm",
+                limit=limit,
+                ids=set(ids.values()),
+            )
+
+    stats = asyncio.run(main())
+    typer.echo(
+        f"{stats.filings} filings: {stats.llm_calls} LLM calls, {stats.llm_cached} cached, "
+        f"status {dict(stats.llm_status)}"
+    )
+    if stats.stopped:
+        typer.echo(f"stopped early: {stats.stopped}", err=True)
+        raise typer.Exit(1)
+
+
+@label_app.command("review")
+def label_review(
+    sample_path: SamplePath = _SAMPLE,
+    labels_path: LabelsPath = _LABELS,
+    redo_skipped: Annotated[bool, typer.Option(help="Show skipped items again.")] = False,
+) -> None:
+    """Check each proposal against the filing and record the truth.
+
+    Resumable: every decision is saved at once, and 'quit' stops cleanly.
+    """
+    from gats.extract.labels import (
+        append_label,
+        load_labels,
+        resolve,
+        review_entry,
+        review_one,
+    )
+
+    sample = _load_sample(sample_path)
+    settings = _settings()
+    ui = _TyperUI()
+
+    async def main() -> None:
+        done = load_labels(labels_path)
+        todo = [
+            item
+            for item in sample.items
+            if item.doc_id not in done
+            or (redo_skipped and done[item.doc_id]["status"] == "skipped")
+        ]
+        typer.echo(
+            f"{len(sample.items) - len(todo)} done, {len(todo)} to go. See labels/README.md."
+        )
+        llm_ok = True
+        async with _services(settings) as svc:
+            with svc.engine.begin() as conn:
+                ids = resolve(conn, sample)
+            for item in todo:
+                entry = await review_entry(svc, item, ids.get(item.doc_id), llm_ok=llm_ok)
+                if entry is None:
+                    if llm_ok:
+                        typer.echo(
+                            "The LLM gave no answer; its items stay pending (start Ollama, "
+                            "or run gats label prepare). Continuing with the rules' items."
+                        )
+                    llm_ok = False
+                    continue
+                labelled = len(load_labels(labels_path).keys() & {i.doc_id for i in sample.items})
+                record = review_one(ui, entry, f"{labelled + 1}/{len(sample.items)}", utcnow)
+                if record is None:
+                    break
+                append_label(labels_path, record)
+
+    asyncio.run(main())
+    _print_label_stats(sample, labels_path)
+
+
+def _print_label_stats(sample: Any, labels_path: Path) -> None:
+    from gats.extract.labels import load_labels, summarize
+
+    for line in summarize(sample, load_labels(labels_path)):
+        typer.echo(line)
+
+
+@label_app.command("stats")
+def label_stats(sample_path: SamplePath = _SAMPLE, labels_path: LabelsPath = _LABELS) -> None:
+    """Labelling progress, decisions, and how often each proposer was accepted."""
+    _print_label_stats(_load_sample(sample_path), labels_path)

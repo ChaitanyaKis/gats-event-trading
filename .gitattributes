@@ -1,2 +1,6 @@
 # Real exchange samples must stay byte-identical (no CRLF conversion).
 tests/fixtures/real/** -text
+
+# Labels are appended by code with LF; keep them LF on every checkout.
+labels/*.jsonl text eol=lf
+labels/*.json text eol=lf

@@ -21,8 +21,9 @@ from __future__ import annotations
 import hashlib
 import inspect
 from collections import Counter
+from collections.abc import Collection
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import date, datetime
 from functools import cache
 from pathlib import Path
 from typing import Any, Literal
@@ -88,40 +89,46 @@ class CascadeStats:
 
 
 def _pending(
-    conn: Connection, event_type: str, taxonomy_version: str, version: str, limit: int
+    conn: Connection,
+    event_type: str,
+    taxonomy_version: str,
+    version: str,
+    limit: int,
+    ids: Collection[int] | None,
 ) -> list[Any]:
     a, et, t, done = announcements, announcement_event_types, document_texts, extractions
-    return list(
-        conn.execute(
-            select(a.c.id, a.c.attachment_doc_id, a.c.event_ts, t.c.text)
-            .select_from(
-                a.join(
-                    et,
-                    and_(
-                        et.c.announcement_id == a.c.id,
-                        et.c.taxonomy_version == taxonomy_version,
-                        et.c.event_type == event_type,
-                    ),
-                )
-                .join(
-                    t,
-                    and_(
-                        t.c.doc_id == a.c.attachment_doc_id,
-                        t.c.extractor == EXTRACTOR,
-                        t.c.extractor_version == EXTRACTOR_VERSION,
-                        t.c.error.is_(None),
-                    ),
-                )
-                .outerjoin(
-                    done,
-                    and_(done.c.announcement_id == a.c.id, done.c.extractor_version == version),
-                )
+    query = (
+        select(a.c.id, a.c.attachment_doc_id, a.c.event_ts, t.c.text)
+        .select_from(
+            a.join(
+                et,
+                and_(
+                    et.c.announcement_id == a.c.id,
+                    et.c.taxonomy_version == taxonomy_version,
+                    et.c.event_type == event_type,
+                ),
             )
-            .where(done.c.announcement_id.is_(None))
-            .order_by(a.c.event_ts.desc())
-            .limit(limit)
-        ).all()
+            .join(
+                t,
+                and_(
+                    t.c.doc_id == a.c.attachment_doc_id,
+                    t.c.extractor == EXTRACTOR,
+                    t.c.extractor_version == EXTRACTOR_VERSION,
+                    t.c.error.is_(None),
+                ),
+            )
+            .outerjoin(
+                done,
+                and_(done.c.announcement_id == a.c.id, done.c.extractor_version == version),
+            )
+        )
+        .where(done.c.announcement_id.is_(None))
+        .order_by(a.c.event_ts.desc())
+        .limit(limit)
     )
+    if ids is not None:
+        query = query.where(a.c.id.in_(list(ids)))
+    return list(conn.execute(query).all())
 
 
 def _cached(conn: Connection, doc_id: str, event_type: str, prompt: str, model: str) -> str | None:
@@ -181,10 +188,34 @@ def _store_llm(
     )
 
 
+async def llm_answer(
+    svc: Services, doc_id: str, text: str, filed: date, event_type: str = "ORDER_WIN"
+) -> tuple[LlmResult, bool]:
+    """The model's answer for one document, and whether it took a new call.
+    A cached reply is validated again; a new call is stored, failed or not."""
+    settings = svc.settings
+    prompt, model = prompt_hash(settings.llm_max_chars), settings.llm_model
+    with svc.engine.begin() as conn:
+        reply = _cached(conn, doc_id, event_type, prompt, model)
+    if reply is not None:
+        return validate_response(reply, model_input(text, settings), filed), False
+    result = await llm_order_win(svc.client, settings, text, filed)
+    with svc.engine.begin() as conn:
+        _store_llm(conn, doc_id, event_type, prompt, model, result, svc.clock())
+    return result, True
+
+
 async def run_extractions(
-    svc: Services, *, event_type: str, taxonomy_version: str, mode: Mode, limit: int
+    svc: Services,
+    *,
+    event_type: str,
+    taxonomy_version: str,
+    mode: Mode,
+    limit: int,
+    ids: Collection[int] | None = None,
 ) -> CascadeStats:
-    """Extract facts for up to ``limit`` filings not yet extracted by this version."""
+    """Extract facts for up to ``limit`` filings (only ``ids``, if given) not
+    yet extracted by this version."""
     if event_type != "ORDER_WIN":
         raise ValueError(f"no extractor for {event_type} yet (M4 scope is ORDER_WIN)")
     settings = svc.settings
@@ -192,7 +223,7 @@ async def run_extractions(
     version = extractor_version(mode, prompt, model)
     stats = CascadeStats(version)
     with svc.engine.begin() as conn:
-        rows = _pending(conn, event_type, taxonomy_version, version, limit)
+        rows = _pending(conn, event_type, taxonomy_version, version, limit, ids)
     failures = 0
     for row in rows:
         filed = to_ist(row.event_ts).date()
@@ -203,19 +234,13 @@ async def run_extractions(
             ruled = extract_order_win(row.text, filed=filed)
             order, method, unsure = ruled.order, f"rules_{ruled.method}", ruled.unsure
         if mode == "llm" or (mode == "cascade" and unsure):
-            with svc.engine.begin() as conn:
-                reply = _cached(conn, row.attachment_doc_id, event_type, prompt, model)
-            result: LlmResult
-            if reply is None:
-                result = await llm_order_win(svc.client, settings, row.text, filed)
+            result, fresh = await llm_answer(
+                svc, row.attachment_doc_id, row.text, filed, event_type
+            )
+            if fresh:
                 stats.llm_calls += 1
                 stats.llm_ms += result.latency_ms or 0
-                with svc.engine.begin() as conn:
-                    _store_llm(
-                        conn, row.attachment_doc_id, event_type, prompt, model, result, svc.clock()
-                    )
             else:
-                result = validate_response(reply, model_input(row.text, settings), filed)
                 stats.llm_cached += 1
             stats.llm_status[result.status] += 1
             if result.status == "error":
