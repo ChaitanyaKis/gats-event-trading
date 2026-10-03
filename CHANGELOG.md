@@ -10,6 +10,10 @@ Schema v7 (new tables only), upgraded automatically.
   `gats bars show` summarises a day, and `gats probe upstox-candles`
   checks a day's bars against NSE's end-of-day file. New optional
   dependency (extra `research`): duckdb.
+- **Ledger and metrics:** `gats.backtest.ledger` turns fills into FIFO
+  trades that reconcile to the paisa and computes P&L, drawdown,
+  Sharpe/Sortino, turnover, a capacity estimate and informational tax
+  categories.
 - **Risk engine:** `gats.risk.engine` vetoes orders by rule (order rate,
   kill-switch file `data/KILL`, daily loss, position and symbol caps, open
   positions, liquidity, surveillance lists, stale data); limits live in

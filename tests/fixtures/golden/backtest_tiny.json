@@ -9,6 +9,7 @@
    "price": 100.67527394999999,
    "at": "2026-07-14 04:36:00+00:00",
    "reason": "order_win_drift: order win #1",
+   "bar_volume": 20000,
    "charges": 30.3206
   },
   {
@@ -20,6 +21,7 @@
    "price": 106.620161725,
    "at": "2026-07-14 05:37:00+00:00",
    "reason": "order_win_drift: exit (held long enough)",
+   "bar_volume": 20000,
    "charges": 53.5413
   },
   {
@@ -31,6 +33,7 @@
    "price": 255.0,
    "at": "2026-07-15 03:45:00+00:00",
    "reason": "order_win_drift: order win #2",
+   "bar_volume": 30000,
    "charges": 30.4571
   },
   {
@@ -42,6 +45,7 @@
    "price": 268.79825,
    "at": "2026-07-15 04:46:00+00:00",
    "reason": "order_win_drift: exit (held long enough)",
+   "bar_volume": 8000,
    "charges": 54.6025
   }
  ],

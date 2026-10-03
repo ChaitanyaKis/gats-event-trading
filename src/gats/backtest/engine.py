@@ -99,6 +99,7 @@ class Execution:
     at: datetime
     charges: Charges
     reason: str
+    bar_volume: int = 0  # volume of the bar it filled in (0: closed at the end of the data)
 
 
 class RiskGate(Protocol):
@@ -139,6 +140,8 @@ class BacktestResult:
     positions: dict[str, Position]
     equity: dict[date, float]  # cash + positions at the day's last price
     duplicates: int = 0  # closing signals dropped because an exit was already working
+    initial_cash: float = 0.0
+    unsettled: float = 0.0  # delivery sale proceeds not yet usable
 
     @property
     def charges(self) -> float:
@@ -193,6 +196,8 @@ class Engine:
             dict(self.state.positions),
             self.equity,
             self.duplicates,
+            self.config.initial_cash,
+            sum(amount for _, amount in self.state.unsettled),
         )
 
     def _context(self, now: datetime) -> StaticContext:
@@ -436,6 +441,7 @@ class Engine:
             price,
             bar.start,
             order.signal.reason,
+            bar.volume,
         )
 
     # --- bookkeeping --------------------------------------------------------------
@@ -450,6 +456,7 @@ class Engine:
         price: float,
         at: datetime,
         reason: str,
+        bar_volume: int = 0,
     ) -> None:
         st = self.state
         day = to_ist(at).date()
@@ -497,5 +504,6 @@ class Engine:
                 at,
                 charges,
                 reason,
+                bar_volume,
             )
         )

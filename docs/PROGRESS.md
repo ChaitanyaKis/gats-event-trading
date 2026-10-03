@@ -5,7 +5,7 @@ Claude Code updates this after every task. Newest log entry first.
 ## Status
 
 - **Version:** 0.2.0 · **Schema:** v7 · **Milestone:** M3 (M1 waits only on T1.6, HUMAN)
-- **Next up:** M6 T6.5 ledger & metrics, then T6.6 registry, T6.7 validation. T5.3 waits for live latency (recorder, item 1). Waiting on the human: recorder (1), M3 run (3), labels (5), Upstox token (6)
+- **Next up:** M6 T6.6 experiment registry, then T6.7 validation. T5.3 waits for live latency (recorder, item 1). Waiting on the human: recorder (1), M3 run (3), labels (5), Upstox token (6)
 
 ## Waiting on the human (HUMAN)
 
@@ -97,7 +97,7 @@ are PowerShell, run from `C:\Projects\GATS`.
 - [ ] M3 Event study (G1 kill test): T3.0 ⏳ (human) · T3.1 ⚠️ · T3.2 ✅ · T3.3 ✅ · T3.4 ✅ (code; real run ⏳ backfill) · T3.5 ⏳ (gate, after the real run)
 - [ ] M4 LLM extraction (infrastructure for ORDER_WIN; scope confirmed at G1): T4.1 ✅ · T4.2 ✅ · T4.3 ✅ · T4.4 ✅ · T4.5 ⏳ (code ✅; labels: human) · T4.6 · T4.7
 - [ ] M5 Intraday data & reaction curves (G1b): T5.1 ⏳ (code ✅; token: human, item 6) · T5.2 ⏳ (code ✅; the fetch needs the token) · T5.3 · T5.4
-- [ ] M6 Backtester (G2): T6.1 ⏳ (model ✅; broker-calculator check needs the token, item 6) · T6.2 ✅ · T6.3 ✅ · T6.4 ✅ · T6.5 · T6.6 · T6.7 · T6.8
+- [ ] M6 Backtester (G2): T6.1 ⏳ (model ✅; broker-calculator check needs the token, item 6) · T6.2 ✅ · T6.3 ✅ · T6.4 ✅ · T6.5 ✅ · T6.6 · T6.7 · T6.8
 - [ ] M7 Paper trading (G3)
 - [ ] M8 Live pilot (G4, human-only)
 
@@ -112,6 +112,14 @@ are PowerShell, run from `C:\Projects\GATS`.
 ## Log
 
 - **2026-10-03:**
+  - T6.5 done. `gats.backtest.ledger`: FIFO trades with both sides' charges pro rata; the
+    trades' net P&L less open lots equals the fills' cash flow to the paisa (tested on the
+    golden run and on a run ending with shares held and unsettled cash). Metrics: net/gross
+    P&L, win rate, profit factor, turnover, drawdown, Sharpe/Sortino (idle sessions count
+    as flat days when the calendar is passed, so sparse event days cannot inflate them),
+    capacity headroom under the participation cap, and informational tax buckets (12-month
+    rule from the Income Tax Department). Not modelled: tick-size rounding of fills (tick
+    sizes are unverified).
   - T6.4 done. `gats.risk.engine` + `configs/risk.yaml`: order rate (5/s; the exchange
     threshold is 10, NSE/INVG/67858), kill-switch file, daily loss, open positions,
     position % of equity, per-symbol cap, liquidity floor, ASM/GSM/T2T block, stale data.
