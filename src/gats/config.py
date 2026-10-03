@@ -66,6 +66,9 @@ class Settings(BaseSettings):
     nse_corp_actions_referer: str = (
         "https://www.nseindia.com/companies-listing/corporate-filings-actions"
     )
+    nse_asm_url: str = "https://www.nseindia.com/api/reportASM"
+    nse_gsm_url: str = "https://www.nseindia.com/api/reportGSM"
+    nse_surveillance_referer: str = "https://www.nseindia.com/reports/asm"
     nse_holidays_url: str = "https://www.nseindia.com/api/holiday-master"
     nse_holidays_referer: str = "https://www.nseindia.com/resources/exchange-communication-holidays"
     # Verified 2026-10-02 (needs browser headers + BSE homepage cookies).

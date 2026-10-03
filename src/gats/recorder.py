@@ -29,10 +29,17 @@ from gats.refdata.ingest import (
     ingest_bse_scrips,
     ingest_nse_corp_actions,
     ingest_nse_holidays,
+    ingest_nse_surveillance,
     ingest_nse_symbol_changes,
 )
 from gats.refdata.link import link_pending
-from gats.sources import bse_scrips, nse_corp_actions, nse_holidays, nse_symbols
+from gats.sources import (
+    bse_scrips,
+    nse_corp_actions,
+    nse_holidays,
+    nse_surveillance,
+    nse_symbols,
+)
 from gats.timeutil import ist_time_of_day, ist_today
 
 log = logging.getLogger(__name__)
@@ -417,6 +424,12 @@ def build_jobs(svc: Services) -> list[Job]:
         async def fetch_holidays(svc: Services) -> Outcome:
             return await ingest_nse_holidays(svc, job="nse_holidays")
 
+        async def fetch_surveillance(svc: Services) -> Outcome:
+            total = Outcome(ok=True)
+            for outcome in await ingest_nse_surveillance(svc, job="nse_surveillance"):
+                total.merge(outcome)
+            return total
+
         async def fetch_corp_actions(svc: Services) -> Outcome:
             today = ist_today(svc.clock())
             return await ingest_nse_corp_actions(
@@ -430,6 +443,8 @@ def build_jobs(svc: Services) -> list[Job]:
             ("bse_scrips", bse_scrips.KIND, fetch_bse_scrips),
             ("nse_symbol_changes", nse_symbols.KIND, fetch_symbol_changes),
             ("nse_holidays", nse_holidays.KIND, fetch_holidays),
+            # Done for the day once the GSM list (fetched second) is in.
+            ("nse_surveillance", nse_surveillance.GSM_KIND, fetch_surveillance),
             *(
                 [("nse_corp_actions", nse_corp_actions.KIND, fetch_corp_actions)]
                 if s.corp_actions_enabled

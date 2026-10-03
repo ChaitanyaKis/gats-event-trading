@@ -20,3 +20,5 @@ exchange data only; nothing personal.
 | `nse_indices_2026-10-01.csv` | `nsearchives.nseindia.com/content/indices/ind_close_all_01102026.csv` | 2026-10-03 | header + benchmark rows (Nifty 50/500, Midcap 150, Smallcap 250, Bank, IT, Pharma, Microcap 250, India VIX) and rows with `-` values |
 | `ca_eod_cases_2025-09.json` | `sec_bhavdata_full` for the previous session and the ex-date of 10 splits/bonuses (Sep 2025) | 2026-10-03 | the EQ line of each symbol on both days, plus the header |
 | `nse_corp_actions_sample.json` | `www.nseindia.com/api/corporates-corporateActions?index=equities&...` (2019-09 → 2026-09) | 2026-10-03 | the 10 cases' Sep 2025 rows, plus real examples of a hyphenated bonus, a bonus of preference shares, a consolidation, rights, a demerger, and an LTI dividend reported under today's symbol LTM |
+| `nse_asm_2026-10-03.json` | `www.nseindia.com/api/reportASM` | 2026-10-03 | 9 of 126 long-term entries (all stages) and 5 of 68 short-term |
+| `nse_gsm_2026-10-03.json` | `www.nseindia.com/api/reportGSM` | 2026-10-03 | 8 of 77 entries, incl. stages `0` and `LXII` |

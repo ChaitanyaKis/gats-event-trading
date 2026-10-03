@@ -414,3 +414,25 @@ corporate_actions = Table(
     Index(None, "ex_date"),
     Index(None, "isin"),
 )
+
+# NSE surveillance lists (T2.9) as versions, keyed "<list>:<symbol>" (e.g.
+# "LTASM:A2ZINFRA"); valid_to is set when the stock leaves the list.
+surveillance_versions = Table(
+    "surveillance_versions",
+    metadata,
+    Column("entity_key", String(80), primary_key=True),
+    Column("valid_from", Date, primary_key=True),
+    Column("valid_to", Date),
+    Column("list_name", String(8), nullable=False),  # LTASM | STASM | GSM
+    Column("symbol", String(64), nullable=False),
+    Column("isin", String(12)),
+    Column("company", Text),
+    Column("stage", String(32)),
+    Column("surv_code", String(64)),
+    Column("surv_desc", Text),
+    Column("since", Date),
+    Column("available_at", UTCDateTime, nullable=False),
+    Column("raw_doc_id", String(64), ForeignKey("raw_documents.doc_id"), nullable=False),
+    Column("parser_version", String(32), nullable=False),
+    Index(None, "symbol"),
+)

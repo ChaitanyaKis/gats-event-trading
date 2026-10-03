@@ -1,7 +1,10 @@
 # Changelog
 
 ## Unreleased
-- **Corporate actions:** NSE's corporate actions are recorded daily
+- **Surveillance lists:** NSE's ASM (long and short term) and GSM lists are
+  recorded daily (`nse_surveillance` job) as dated history;
+  `AsOf.surveillance(symbol)` reports list stages, the GSM remark and
+  trade-for-trade status (BE/BZ/ST/SZ series).- **Corporate actions:** NSE's corporate actions are recorded daily
   (`nse_corp_actions` job; `gats backfill corporate-actions` for history),
   with splits, bonuses and consolidations turned into share multipliers.
   Daily returns must be computed with `ReturnAdjuster` (`AsOf.return_adjuster()`):

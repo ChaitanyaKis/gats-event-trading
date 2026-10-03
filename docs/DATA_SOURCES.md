@@ -18,6 +18,9 @@ new source gets a row here before code depends on it.
 | NSE market hours | `https://www.nseindia.com/static/market-data/market-timings` | VERIFIED 2026-10-03 | Capital market: pre-open 09:00–09:08, normal market **09:15–15:30**, closing session 15:40–16:00. Used as `GATS_SESSION_OPEN_IST` / `_CLOSE_IST`. |
 | NSE index closes | `https://nsearchives.nseindia.com/content/indices/ind_close_all_DDMMYYYY.csv` | VERIFIED 2026-10-03 | Header `Index Name, Index Date (DD-MM-YYYY), Open/High/Low/Closing Index Value, Points Change, Change(%), Volume, Turnover (Rs. Cr.), P/E, P/B, Div Yield`; `-` = not applicable. 167 indices (2026-10-01), 79 (2019-10-01). Weekends and holidays **404** (cleaner than the bhavcopy); special sessions have files. Files back to ≥ 2012 but names change (`S&P CNX Nifty` 2012 → `CNX Nifty` 2013 → `Nifty 50`); benchmark names stable 2019→2026. One year backfilled: 248 sessions 2025-10-01 → 2026-10-01. Real sample: `tests/fixtures/real/nse_indices_2026-10-01.csv`. |
 | NSE corporate actions | `https://www.nseindia.com/api/corporates-corporateActions?index=equities&from_date=DD-MM-YYYY&to_date=DD-MM-YYYY` (warm-up cookies) | VERIFIED 2026-10-03 | JSON list: `symbol, series, isin, comp, subject, exDate, recDate, faceVal, bc*/nd* dates, caBroadcastDate, ind`. One-year ranges work (1,955–2,706 rows/yr, 2019→2026; 17,019 stored). **`symbol`/`comp` are as of the fetch** (LTI's 2019 dividend appears under LTM; Tata Motors' 2023 dividend under TMPV). `subject` is free text: `Bonus a:b` (also `Bonus- a:b`), `Face Value Split (Sub-Division) - From Rs X/- Per Share To Re/Rs Y/- Per Share`, `Consolidation Of Equity Shares From Re 1 … To Rs 10`, `Rights a:b @ Premium Rs P/-`, `Demerger`, `Scheme Of Arrangement - Bonus Ncrps a:b` (also misspelt `Arangement`), dividends. Real sample: `tests/fixtures/real/nse_corp_actions_sample.json`. |
+| NSE ASM lists | `https://www.nseindia.com/api/reportASM` (warm-up cookies) | VERIFIED 2026-10-03 | `{"longterm": {"data": [...]}, "shortterm": {"data": [...]}}`; rows `symbol, isin, companyName, asmSurvIndicator ("Stage I"…"Stage IV"), survCode ("LTASM - I (13)"), survDesc, asmTime (DD-Mon-YYYY), series (null), srno`. 126 long-term + 68 short-term on 2026-10-03. Current-only. Real sample: `tests/fixtures/real/nse_asm_2026-10-03.json`. |
+| NSE GSM list | `https://www.nseindia.com/api/reportGSM` | VERIFIED 2026-10-03 | List of `symbol, isin, companyName, gsmStage ("0", "LXII", …), survCode ("IBC I & GSM 0 (58)"), survDesc, gsmTime (DD-Mon-YYYY HH:MM:SS), srno`; 77 entries. Current-only. |
+| NSE series legend | `https://www.nseindia.com/static/market-data/legend-of-series` | VERIFIED 2026-10-03 | Fully paid equity: **EQ** rolling, **BE/BZ** trade-for-trade; SME: **SM** rolling, **ST/SZ** trade-for-trade. BE = moved to T2T (surveillance); BZ/SZ = T2T for non-compliance (SEBI CIR/MRD/DSA/31/2013). |
 | BSE attachments | `https://www.bseindia.com/xml-data/corpfiling/AttachLive/<file>` (falls back to `AttachHis/`) | VERIFIED 2026-09-26 | PDFs, often large. Stored per the attachment policy. |
 
 ## BSE announcements
@@ -100,7 +103,7 @@ new source gets a row here before code depends on it.
 
 | Need | Candidate | Task |
 |---|---|---|
-| ASM/GSM lists | NSE/BSE surveillance pages | T2.9 |
+| BSE ASM/GSM lists | BSE surveillance pages (NSE lists cover most names) | later |
 | Minute candles | Upstox historical candle API v3 (1-min since Jan 2022, per its docs) | T5.1 |
 
 ## History depth (T1.4, probed 2026-10-02)

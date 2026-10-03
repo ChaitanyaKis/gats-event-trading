@@ -20,10 +20,12 @@ from gats.db.schema import (
     eod_prices,
     index_eod,
     price_bands,
+    surveillance_versions,
 )
 from gats.refdata.actions import ReturnAdjuster
 from gats.refdata.calendar import TradingCalendar
 from gats.refdata.master import Resolver
+from gats.sources.nse_surveillance import TRADE_FOR_TRADE_SERIES
 from gats.timeutil import ensure_aware, to_ist
 
 
@@ -160,3 +162,48 @@ class AsOf:
         if self._adjuster is None:
             self._adjuster = ReturnAdjuster.load(self._conn, as_of=self._as_of)
         return self._adjuster
+
+    def surveillance(self, symbol: str) -> dict[str, Any]:
+        """What restricts trading in ``symbol`` as of the clock.
+
+        ``lists``: ASM/GSM entries in force (stage per list); ``gsm_remark``:
+        the GSM stage in the latest price-band file; ``trade_for_trade``: the
+        latest band file lists it only in a BE/BZ/ST/SZ series (delivery only,
+        no intraday). The risk engine blocks on any of these.
+        """
+        symbol = symbol.upper()
+        today = to_ist(self._as_of).date()
+        lists = {
+            row.list_name: row.stage
+            for row in self._conn.execute(
+                select(surveillance_versions).where(
+                    surveillance_versions.c.symbol == symbol,
+                    surveillance_versions.c.valid_from <= today,
+                    (surveillance_versions.c.valid_to.is_(None))
+                    | (surveillance_versions.c.valid_to > today),
+                    surveillance_versions.c.available_at <= self._as_of,
+                )
+            )
+        }
+        latest = self._conn.execute(
+            select(func.max(price_bands.c.as_of_date)).where(
+                price_bands.c.symbol == symbol, price_bands.c.available_at <= self._as_of
+            )
+        ).scalar()
+        series: set[str] = set()
+        remark = None
+        if latest is not None:
+            for row in self._conn.execute(
+                select(price_bands).where(
+                    price_bands.c.symbol == symbol, price_bands.c.as_of_date == latest
+                )
+            ):
+                series.add(row.series)
+                if row.remarks and "GSM" in row.remarks.upper():
+                    remark = row.remarks
+        return {
+            "lists": lists,
+            "gsm_remark": remark,
+            "trade_for_trade": bool(series) and series <= TRADE_FOR_TRADE_SERIES,
+            "band_date": latest,
+        }

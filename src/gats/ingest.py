@@ -34,6 +34,7 @@ from gats.sources import (
     nse_corp_actions,
     nse_holidays,
     nse_indices,
+    nse_surveillance,
     nse_symbols,
 )
 from gats.sources.models import AnnouncementRecord, ParseResult, PayloadError
@@ -44,7 +45,14 @@ log = logging.getLogger(__name__)
 # Reference files applied by gats.refdata (kept here so reparse can route them
 # without importing gats.refdata at module load: it imports this module).
 REFERENCE_KINDS = frozenset(
-    {bse_scrips.KIND, nse_symbols.KIND, nse_holidays.KIND, nse_corp_actions.KIND}
+    {
+        bse_scrips.KIND,
+        nse_symbols.KIND,
+        nse_holidays.KIND,
+        nse_corp_actions.KIND,
+        nse_surveillance.ASM_KIND,
+        nse_surveillance.GSM_KIND,
+    }
 )
 
 

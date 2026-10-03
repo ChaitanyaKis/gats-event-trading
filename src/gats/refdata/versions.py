@@ -98,13 +98,23 @@ def apply_snapshot(
     available_at: datetime,
     raw_doc_id: str,
     parser_version: str,
+    min_share_for_removals: float = MIN_SHARE_FOR_REMOVALS,
+    scope: Any = None,
 ) -> ApplyStats:
-    """Apply one snapshot taken on ``as_of`` and log it in ``refdata_snapshots``."""
+    """Apply one snapshot taken on ``as_of`` and log it in ``refdata_snapshots``.
+
+    ``min_share_for_removals`` is the truncation guard: a snapshot listing
+    fewer than this share of the open versions closes none of them. Short
+    lists (surveillance) shrink legitimately, so they pass a lower share; an
+    empty snapshot never closes anything. ``scope`` (a SQL condition) limits
+    the versions this snapshot owns, when one table holds several files.
+    """
     stats = ApplyStats()
     key_col = table.c[key]
-    rows = conn.execute(
-        select(table).where(or_(table.c.valid_to.is_(None), table.c.valid_to > as_of))
-    ).all()
+    query = select(table).where(or_(table.c.valid_to.is_(None), table.c.valid_to > as_of))
+    if scope is not None:
+        query = query.where(scope)
+    rows = conn.execute(query).all()
     covering: dict[str, Any] = {}
     next_from: dict[str, date] = {}
     for row in rows:
@@ -150,7 +160,7 @@ def apply_snapshot(
 
     missing = [k for k in covering if k not in seen]
     if missing:
-        if len(seen) >= MIN_SHARE_FOR_REMOVALS * len(covering):
+        if seen and len(seen) >= min_share_for_removals * len(covering):
             stats.closed = len(missing)
             to_close.extend({"k": k, "vf": covering[k].valid_from} for k in missing)
         else:

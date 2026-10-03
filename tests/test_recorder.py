@@ -79,6 +79,7 @@ def test_build_jobs_respects_flags(svc: Services) -> None:
         "bse_scrips",
         "nse_symbol_changes",
         "nse_holidays",
+        "nse_surveillance",
         "nse_corp_actions",
         "master_build",
         "link",

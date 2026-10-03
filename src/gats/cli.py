@@ -43,6 +43,7 @@ from gats.refdata.ingest import (
     ingest_bse_scrips,
     ingest_nse_corp_actions,
     ingest_nse_holidays,
+    ingest_nse_surveillance,
     ingest_nse_symbol_changes,
 )
 from gats.refdata.link import link_pending
@@ -54,6 +55,7 @@ from gats.sources import (
     nse_corp_actions,
     nse_holidays,
     nse_indices,
+    nse_surveillance,
     nse_symbols,
 )
 from gats.sources._util import preview
@@ -95,6 +97,8 @@ class ReparseKind(StrEnum):
     nse_symbol_changes = nse_symbols.KIND
     nse_holidays = nse_holidays.KIND
     nse_corp_actions = nse_corp_actions.KIND
+    nse_asm = nse_surveillance.ASM_KIND
+    nse_gsm = nse_surveillance.GSM_KIND
 
 
 def _settings(log_to_file: bool = True) -> Settings:
@@ -689,6 +693,8 @@ def refdata_update() -> None:
                 ("nse_symbol_changes", await ingest_nse_symbol_changes(svc, job=job)),
                 ("nse_holidays", await ingest_nse_holidays(svc, job=job)),
             ]
+            asm, gsm = await ingest_nse_surveillance(svc, job=job)
+            results += [("nse_asm", asm), ("nse_gsm", gsm)]
             for what in ("instruments", "bands"):
                 with svc.engine.begin() as conn:
                     have = repo.has_rows_for_date(
