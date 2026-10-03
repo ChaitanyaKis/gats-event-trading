@@ -147,6 +147,10 @@ class Settings(BaseSettings):
 
     snapshots_enabled: bool = True
     refdata_enabled: bool = True  # BSE scrip list (and later reference files)
+    # The security master is rebuilt once a day after the reference snapshots
+    # (taken from daily_snapshot_after_ist), and new filings are linked to it.
+    master_build_after_ist: time = time(9, 0)
+    link_poll_s: float = Field(default=60.0, gt=0)
     snapshot_check_s: float = Field(default=1800.0, gt=0)
     daily_snapshot_after_ist: time = time(8, 0)
 

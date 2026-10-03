@@ -24,8 +24,9 @@ from gats.db import repo
 from gats.db.repo import IngestMode
 from gats.ingest import Outcome, Services
 from gats.logging_setup import kv
-from gats.refdata import versions
+from gats.refdata import master, versions
 from gats.refdata.ingest import ingest_bse_scrips, ingest_nse_symbol_changes
+from gats.refdata.link import link_pending
 from gats.sources import bse_scrips, nse_archives, nse_symbols
 from gats.timeutil import is_weekday, ist_time_of_day, ist_today
 
@@ -204,6 +205,60 @@ class RefdataJob:
 
 
 @dataclass
+class MasterBuildJob:
+    """Rebuild the security master once a day, after the reference files."""
+
+    name: str
+    check_s: float
+    after: time
+
+    def interval_s(self, now: datetime) -> float:
+        return self.check_s
+
+    async def run_once(self, svc: Services) -> Outcome:
+        now = svc.clock()
+        if ist_time_of_day(now) < self.after:
+            return Outcome(ok=True, meta={"skipped": "before daily window"})
+        with svc.engine.begin() as conn:
+            built_at = master.latest_build_time(conn)
+            if built_at is not None and ist_today(built_at) == ist_today(now):
+                return Outcome(ok=True, meta={"skipped": "already built today"})
+            stats = master.build(conn, now)
+        return Outcome(
+            ok=True, n_records=stats.securities, n_new=stats.new_securities, meta=stats.as_dict()
+        )
+
+
+@dataclass
+class LinkJob:
+    """Link new filings to securities; retry unresolved ones after each build."""
+
+    name: str
+    poll_s: float
+    _resolver: master.Resolver | None = field(default=None, init=False)
+    _build_id: int | None = field(default=None, init=False)
+
+    def interval_s(self, now: datetime) -> float:
+        return self.poll_s
+
+    async def run_once(self, svc: Services) -> Outcome:
+        with svc.engine.begin() as conn:
+            build_id = master.latest_build_id(conn)
+            if build_id is None:
+                return Outcome(ok=True, meta={"skipped": "no security master yet"})
+            if build_id != self._build_id or self._resolver is None:
+                self._resolver = master.Resolver.load(conn, build_id)
+                self._build_id = build_id
+            stats = link_pending(conn, svc.clock(), self._resolver)
+        return Outcome(
+            ok=True,
+            n_records=stats.considered,
+            n_new=stats.linked,
+            meta={"unresolved": stats.unresolved},
+        )
+
+
+@dataclass
 class AttachmentsJob:
     name: str
     poll_s: float
@@ -322,6 +377,8 @@ def build_jobs(svc: Services) -> list[Job]:
             jobs.append(
                 RefdataJob(name, kind, s.snapshot_check_s, s.daily_snapshot_after_ist, fetch)
             )
+        jobs.append(MasterBuildJob("master_build", s.snapshot_check_s, s.master_build_after_ist))
+        jobs.append(LinkJob("link", s.link_poll_s))
     if s.attachments_enabled:
         jobs.append(AttachmentsJob("attachments", s.attachments_poll_s))
     sources = tuple(

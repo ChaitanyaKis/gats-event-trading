@@ -37,8 +37,9 @@ from gats.net import FetchError, PoliteClient
 from gats.rawstore import RawStore
 from gats.recorder import run_recorder
 from gats.refdata import master
-from gats.refdata.coverage import bse_scrip_isin_coverage
+from gats.refdata.coverage import bse_scrip_isin_coverage, link_coverage
 from gats.refdata.ingest import ingest_bse_scrips, ingest_nse_symbol_changes
+from gats.refdata.link import link_pending
 from gats.sources import bse, bse_scrips, nse, nse_archives, nse_symbols
 from gats.sources._util import preview
 from gats.sources.models import PayloadError
@@ -632,7 +633,11 @@ def refdata_coverage(
     init_db(engine)
     since = utcnow() - timedelta(days=days)
     with engine.begin() as conn:
-        reports = [bse_scrip_isin_coverage(conn, since, top)]
+        reports = [
+            link_coverage(conn, "NSE", since, top),
+            link_coverage(conn, "BSE", since, top),
+            bse_scrip_isin_coverage(conn, since, top),
+        ]
     engine.dispose()
     for cov in reports:
         typer.echo(
@@ -645,16 +650,22 @@ def refdata_coverage(
 
 @refdata_app.command("build")
 def refdata_build() -> None:
-    """Rebuild the security master from the reference tables (idempotent)."""
+    """Rebuild the security master and link filings to it (idempotent)."""
     settings = _settings()
     engine = make_engine(settings.resolved_db_url)
     init_db(engine)
     with engine.begin() as conn:
         stats = master.build(conn, utcnow())
-    engine.dispose()
     typer.echo(f"build {stats.build_id}: {stats.as_dict()}")
     for conflict in stats.conflicts[:10]:
         typer.echo(f"  conflict: {conflict}")
+    with engine.begin() as conn:
+        linked = link_pending(conn, utcnow())
+    engine.dispose()
+    typer.echo(
+        f"linked {linked.linked} filings, {linked.unresolved} unresolved "
+        f"(of {linked.considered} needing a link) {linked.by_method}"
+    )
 
 
 class IdType(StrEnum):

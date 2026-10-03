@@ -223,6 +223,11 @@ def latest_build_id(conn: Connection) -> int | None:
     return value
 
 
+def latest_build_time(conn: Connection) -> datetime | None:
+    value: datetime | None = conn.execute(select(func.max(refdata_builds.c.built_at))).scalar()
+    return value
+
+
 def build(conn: Connection, now: datetime) -> BuildStats:
     """Rebuild the security master from the reference tables (idempotent)."""
     stats = BuildStats()

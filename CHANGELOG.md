@@ -1,7 +1,11 @@
 # Changelog
 
 ## Unreleased
-- **Security master:** `gats refdata build` joins NSE symbols (with their
+- **Filings linked to securities:** every announcement gets a
+  `security_id` (`announcement_security`), kept current by new recorder jobs
+  `master_build` (daily) and `link` (every minute). `gats refdata build` also
+  links; `gats refdata coverage` reports the linked share per exchange and
+  lists what is unresolved.- **Security master:** `gats refdata build` joins NSE symbols (with their
   rename history) and BSE scrip codes through ISINs into stable
   `security_id`s with dated identifier windows; `gats refdata resolve
   nse_symbol ZOMATO --date 2024-08-01` shows what an identifier meant on a

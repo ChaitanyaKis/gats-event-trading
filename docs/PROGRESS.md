@@ -5,7 +5,7 @@ Claude Code updates this after every task. Newest log entry first.
 ## Status
 
 - **Version:** 0.1.2 · **Schema:** v4 · **Milestone:** M2 (M1 waits only on T1.6, HUMAN)
-- **Next up:** T2.4 Link announcements
+- **Next up:** T2.5 Cross-exchange dedupe
 
 ## Waiting on the human (HUMAN)
 
@@ -32,7 +32,7 @@ are PowerShell, run from `C:\Projects\GATS`.
 
 - [x] M1 core recorder (0.1.0 → 0.1.2)
 - [ ] M1 finishing: T1.1 ✅ · T1.2 ✅ · T1.3 ✅ · T1.4 ✅ · T1.5 ✅ · T1.6
-- [ ] M2 Reference data & entity resolution: T2.1 ✅ · T2.2 ✅ · T2.3 ✅ · T2.4 · T2.5 · T2.6 · T2.7 · T2.8 · T2.9
+- [ ] M2 Reference data & entity resolution: T2.1 ✅ · T2.2 ✅ · T2.3 ✅ · T2.4 ✅ · T2.5 · T2.6 · T2.7 · T2.8 · T2.9
 - [ ] M3 Event study (G1 kill test)
 - [ ] M4 LLM extraction
 - [ ] M5 Intraday data & reaction curves (G1b)
@@ -51,6 +51,14 @@ are PowerShell, run from `C:\Projects\GATS`.
 ## Log
 
 - **2026-10-03:**
+  - T2.4 done. `announcement_security` links (NSE: ISIN on the event date,
+    else symbol as of `first_seen_at`; BSE: scrip code). Recorder jobs
+    `master_build` (daily, after 09:00 IST) and `link` (every 60 s; unresolved
+    retried only after a new build; merged ids relinked). Coverage, last 30
+    days: **NSE 100% (16,292/16,292), BSE 99.7% (14,244/14,285)**; every
+    unresolved BSE filing is a REIT/InvIT (not equities, absent from BSE's
+    Equity scrip list). T2.1 check on the same data: 99.6% of BSE filings map
+    to an ISIN.
   - T2.3 done. Security master (`gats.refdata.master`): NSE rename chains +
     BSE scrips joined by ISIN (union-find) → 11,006 securities, 23k
     identifier windows; `gats refdata build|resolve`; `AsOf.security()`

@@ -77,12 +77,14 @@ def test_build_jobs_respects_flags(svc: Services) -> None:
         "reconcile",
         "bse_scrips",
         "nse_symbol_changes",
+        "master_build",
+        "link",
     }
     svc.settings.nse_enabled = False
     svc.settings.attachments_enabled = False
     svc.settings.refdata_enabled = False
     names = {job.name for job in build_jobs(svc)}
-    assert not names & {"nse_announcements", "attachments", "bse_scrips", "nse_symbol_changes"}
+    assert not names & {"nse_announcements", "attachments", "bse_scrips", "link"}
 
 
 @pytest.mark.parametrize(

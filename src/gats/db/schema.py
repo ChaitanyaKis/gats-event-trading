@@ -293,3 +293,17 @@ security_identifiers = Table(
     Column("last_build_id", Integer, nullable=False),
     Index(None, "security_id"),
 )
+
+# Which security each filing is about (T2.4). Unresolved filings get a row
+# with security_id NULL, so they are retried only when a newer master build
+# exists instead of on every pass.
+announcement_security = Table(
+    "announcement_security",
+    metadata,
+    Column("announcement_id", Integer, ForeignKey("announcements.id"), primary_key=True),
+    Column("security_id", Integer),
+    Column("method", String(16)),  # isin | nse_symbol | bse_scrip
+    Column("build_id", Integer, nullable=False),
+    Column("linked_at", UTCDateTime, nullable=False),
+    Index(None, "security_id"),
+)
