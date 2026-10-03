@@ -5,7 +5,7 @@ Claude Code updates this after every task. Newest log entry first.
 ## Status
 
 - **Version:** 0.2.0 · **Schema:** v5 · **Milestone:** M3 (M1 waits only on T1.6, HUMAN)
-- **Next up:** T3.4 Statistics & report (T3.0 plan is waiting for the human: item 3)
+- **Next up:** M4 T4.1 Attachment text (M3's real run waits on the T3.0 backfill: item 3)
 
 ## Waiting on the human (HUMAN)
 
@@ -67,7 +67,7 @@ are PowerShell, run from `C:\Projects\GATS`.
 - [x] M1 core recorder (0.1.0 → 0.1.2)
 - [ ] M1 finishing: T1.1 ✅ · T1.2 ✅ · T1.3 ✅ · T1.4 ✅ · T1.5 ✅ · T1.6
 - [x] M2 Reference data & entity resolution (0.2.0): T2.1 ✅ · T2.2 ✅ · T2.3 ✅ · T2.4 ✅ · T2.5 ✅ · T2.6 ✅ · T2.7 ✅ · T2.8 ✅ · T2.9 ✅
-- [ ] M3 Event study (G1 kill test): T3.0 ⏳ (human) · T3.1 ⚠️ · T3.2 ✅ · T3.3 ✅ · T3.4 · T3.5
+- [ ] M3 Event study (G1 kill test): T3.0 ⏳ (human) · T3.1 ⚠️ · T3.2 ✅ · T3.3 ✅ · T3.4 ✅ (code; real run ⏳ backfill) · T3.5 ⏳ (gate, after the real run)
 - [ ] M4 LLM extraction
 - [ ] M5 Intraday data & reaction curves (G1b)
 - [ ] M6 Backtester (G2)
@@ -85,6 +85,20 @@ are PowerShell, run from `C:\Projects\GATS`.
 ## Log
 
 - **2026-10-03:**
+  - T3.4 code done: `gats.research.stats` (CR1 clustered SE, Student-t via
+    incomplete beta pinned to table values, date-cluster bootstrap, BH, FCR
+    bounds) and `gats.research.report` (G1 table applying the pre-registered
+    rule mechanically, all types train/test, liquidity buckets fixed before any
+    run, filter accounting, CAR plot, 3-event spot-check list).
+    `gats research event-study` now writes `reports/M3_event_study.md` and
+    logs the trial; `gats research report --run <id>` rebuilds it. Synthetic
+    checks: a planted +2% passes, no effect → "no edge found", N < 100 fails.
+  - **M3 is now waiting only on data:** after phase A of the backfill
+    (item 3), `/gats` runs the study once, spot-checks 3 events against the
+    raw bhavcopy and writes `docs/research/M3_decision.md` (T3.5, G1).
+  - Decision: while waiting for G1, build M4's infrastructure (text
+    extraction, schemas, rules) for ORDER_WIN, the roadmap's default
+    candidate. No research is run on it until G1 says so.
   - T3.3 done. `gats.research.event_study` (entry = first regular open
     strictly after availability; split-safe returns; market-adjusted vs Nifty
     500; filters with one reason each; Parquet output) and `gats research

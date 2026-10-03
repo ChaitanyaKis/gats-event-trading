@@ -1,7 +1,11 @@
 # Changelog
 
 ## Unreleased
-- **Event-study engine:** `gats research event-study` runs the
+- **M3 report:** `gats research event-study` also writes
+  `reports/M3_event_study.md` (G1 verdict from the pre-registered rule,
+  train vs test for every type, liquidity buckets, CAR plot, filter
+  accounting, spot-check list) and logs the trial; `gats research report
+  --run <id>` rebuilds it from a saved run.- **Event-study engine:** `gats research event-study` runs the
   pre-registered M3 study (`configs/studies/m3_event_study.yaml`) and writes
   a per-event Parquet frame. It refuses an edited config or incomplete data.
   New optional extra `research` (numpy, pyarrow, matplotlib).- **Event types:** every filing is typed by a versioned, rule-based

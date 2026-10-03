@@ -978,3 +978,69 @@ def research_event_study(
     typer.echo(f"run {run_id}: {len(rows)} events -> {out / 'events.parquet'}")
     for event_type, counts in sorted(filter_counts(results).items()):
         typer.echo(f"  {event_type:20} {counts}")
+    _write_m3_report(rows, cfg, digest, run_id, fingerprint, log_trial=not earlier)
+
+
+def _write_m3_report(
+    rows: list[dict[str, Any]],
+    cfg: Any,
+    digest: str,
+    run_id: str,
+    fingerprint: dict[str, Any],
+    *,
+    log_trial: bool,
+) -> None:
+    from gats.research.report import build_report, car_plot, trial_row
+
+    reports = Path("reports")
+    figure = reports / "figures" / "m3_car.png"
+    text, family = build_report(
+        rows,
+        cfg,
+        config_hash=digest,
+        run_id=run_id,
+        fingerprint=fingerprint,
+        figure="figures/m3_car.png",
+    )
+    from gats.research.report import _cells_for
+
+    cells, _ = _cells_for(rows, cfg)
+    car_plot(cells, cfg, figure)
+    reports.mkdir(parents=True, exist_ok=True)
+    (reports / "M3_event_study.md").write_bytes(text.encode("utf-8"))
+    typer.echo(f"report: {reports / 'M3_event_study.md'}")
+    passing = [f"{c.event_type} {c.exit}" for c in family if c.passes]
+    typer.echo("G1: " + ("PASS for " + ", ".join(passing) if passing else "no edge found"))
+    trials = Path("docs/research/trials.md")
+    if log_trial and trials.exists():
+        with trials.open("a", encoding="utf-8") as handle:
+            handle.write(trial_row(run_id, cfg, family, ist_today()) + "\n")
+        typer.echo(f"trial logged in {trials}")
+
+
+@research_app.command("report")
+def research_report(
+    run: Annotated[str, typer.Option(help="Run id (a folder under data/research/<study>/).")],
+    config: Annotated[Path, typer.Option(help="Study config (YAML).")] = Path(
+        "configs/studies/m3_event_study.yaml"
+    ),
+    prereg: Annotated[
+        Path, typer.Option(help="Pre-registration recording the config's hash.")
+    ] = Path("docs/research/M3_prereg.md"),
+) -> None:
+    """Rebuild the report from a saved run without recomputing anything."""
+    import pyarrow.parquet as pq
+
+    from gats.research.runs import previous_runs
+    from gats.research.study import verify_registration
+
+    settings = _settings(log_to_file=False)
+    cfg, digest = verify_registration(config, prereg)
+    path = settings.data_dir / "research" / cfg.study / run / "events.parquet"
+    if not path.exists():
+        typer.echo(f"no such run: {path}")
+        raise typer.Exit(1)
+    rows = pq.read_table(path).to_pylist()
+    logged = [r for r in previous_runs(settings.data_dir, cfg.study, digest) if r["run_id"] == run]
+    fingerprint = {k: v for k, v in (logged[0] if logged else {}).items() if k.startswith("eod")}
+    _write_m3_report(rows, cfg, digest, run, fingerprint, log_trial=False)
