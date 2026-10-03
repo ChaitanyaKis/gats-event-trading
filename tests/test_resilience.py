@@ -347,8 +347,24 @@ class TestSchemaUpgrade:
             version = conn.execute(
                 text("SELECT value FROM schema_meta WHERE key='schema_version'")
             ).scalar_one()
-        assert version == str(SCHEMA_VERSION) == "6"
+        assert version == str(SCHEMA_VERSION)
         assert added <= set(inspect(engine).get_table_names())
+        engine.dispose()
+
+    def test_v6_database_gains_bar_months(self, tmp_path: Path) -> None:
+        engine = make_engine(f"sqlite:///{tmp_path / 'v6.db'}")
+        metadata.create_all(
+            engine, tables=[t for name, t in metadata.tables.items() if name != "bar_months"]
+        )
+        with engine.begin() as conn:
+            conn.execute(text("INSERT INTO schema_meta VALUES ('schema_version', '6')"))
+        init_db(engine)
+        with engine.begin() as conn:
+            version = conn.execute(
+                text("SELECT value FROM schema_meta WHERE key='schema_version'")
+            ).scalar_one()
+        assert version == str(SCHEMA_VERSION) == "7"
+        assert "bar_months" in inspect(engine).get_table_names()
         engine.dispose()
 
     def test_newer_database_is_refused(self, tmp_path: Path) -> None:

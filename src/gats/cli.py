@@ -104,6 +104,8 @@ class ProbeTarget(StrEnum):
     indices = "indices"
     bands = "bands"
     instruments = "instruments"
+    upstox_instruments = "upstox-instruments"
+    upstox_candles = "upstox-candles"
 
 
 class AnnSource(StrEnum):
@@ -227,6 +229,7 @@ def probe(
         str | None,
         typer.Option("--date", help="YYYY-MM-DD (default: today IST, or last weekday for eod)."),
     ] = None,
+    symbol: Annotated[str, typer.Option(help="NSE symbol, for upstox-candles.")] = "RELIANCE",
 ) -> None:
     """Fetch one sample, save it, and report how the parser handles it.
 
@@ -237,6 +240,8 @@ def probe(
     probes_dir = settings.data_dir / "probes"
     probes_dir.mkdir(parents=True, exist_ok=True)
     when = _parse_day(day) if day else None
+    if target in (ProbeTarget.upstox_instruments, ProbeTarget.upstox_candles):
+        raise typer.Exit(asyncio.run(_probe_upstox(settings, target, when, symbol, probes_dir)))
 
     async def main() -> int:
         async with _services(settings) as svc:
@@ -1373,3 +1378,198 @@ def _print_label_stats(sample: Any, labels_path: Path) -> None:
 def label_stats(sample_path: SamplePath = _SAMPLE, labels_path: LabelsPath = _LABELS) -> None:
     """Labelling progress, decisions, and how often each proposer was accepted."""
     _print_label_stats(_load_sample(sample_path), labels_path)
+
+
+def _last_weekday_before(day: date) -> date:
+    day -= timedelta(days=1)
+    while day.weekday() >= 5:
+        day -= timedelta(days=1)
+    return day
+
+
+async def _probe_upstox(
+    settings: Settings, target: ProbeTarget, when: date | None, symbol: str, probes_dir: Path
+) -> int:
+    """The Upstox probes: the instrument file (public) and one day of
+    one-minute candles (needs the Analytics Token), checked against our own
+    NSE end-of-day row."""
+    from gats.db.schema import eod_prices
+    from gats.marketdata.bars import eod_check, summarize
+    from gats.marketdata.upstox import TokenMissing, auth_headers, key_for_symbol
+    from gats.sources import upstox
+
+    async with _services(settings) as svc:
+        s = svc.settings
+        stamp = utcnow().strftime("%Y%m%dT%H%M%SZ")
+        if target is ProbeTarget.upstox_instruments:
+            try:
+                got = await svc.client.get(s.upstox_instruments_url)
+            except FetchError as exc:
+                typer.echo(f"FETCH FAILED: {exc}")
+                return 1
+            kind, meta, suffix = upstox.INSTRUMENTS_KIND, {}, ".json.gz"
+        else:
+            the_day = when or _last_weekday_before(ist_today())
+            with svc.engine.begin() as conn:
+                key = key_for_symbol(conn, symbol)
+            if key is None:
+                typer.echo(f"no ISIN for {symbol} yet: run `gats probe instruments` first")
+                return 1
+            try:
+                headers = auth_headers(svc)
+            except TokenMissing as exc:
+                typer.echo(str(exc))
+                return 1
+            url = upstox.candles_url(s.upstox_api_base, key, "minutes", 1, the_day, the_day)
+            try:
+                got = await svc.client.get(url, headers=headers)
+            except FetchError as exc:
+                typer.echo(f"FETCH FAILED: {exc}")
+                return 1
+            kind, suffix = upstox.CANDLES_KIND, ".json"
+            meta = {"instrument_key": key, "from": the_day.isoformat(), "to": the_day.isoformat()}
+        sample_path = probes_dir / f"{target.value}-{stamp}{suffix}"
+        sample_path.write_bytes(got.content)
+        with svc.engine.begin() as conn:
+            repo.save_raw(
+                conn,
+                svc.store,
+                got.content,
+                kind=kind,
+                source=upstox.SOURCE,
+                url=got.url,
+                content_type=got.content_type,
+                fetched_at=got.fetched_at,
+                meta=meta,
+            )
+        typer.echo(f"url:          {got.url}")
+        typer.echo(f"http status:  {got.status}")
+        typer.echo(f"size:         {len(got.content):,} bytes  ({got.elapsed_ms} ms)")
+        typer.echo(f"saved to:     {sample_path}")
+        if not got.ok:
+            typer.echo(f"first bytes:  {got.content[:300]!r}")
+            return 1
+        try:
+            if target is ProbeTarget.upstox_instruments:
+                instruments = upstox.parse_instruments(got.content)
+                types = Counter((r.segment, r.instrument_type) for r in instruments.records)
+                typer.echo(f"meta:         {instruments.meta}")
+                typer.echo(f"kept by type: {dict(types.most_common(12))}")
+                for warning in instruments.warnings[:10]:
+                    typer.echo(f"warning: {warning}")
+                return 0
+            bars = upstox.parse_candles(got.content, instrument_key=meta["instrument_key"])
+        except PayloadError as exc:
+            typer.echo(f"PARSE FAILED: {exc}")
+            return 1
+        for warning in bars.warnings[:10]:
+            typer.echo(f"warning: {warning}")
+        summary = summarize(bars.records)
+        if summary is None:
+            typer.echo(f"no bars for {symbol} on {the_day} (a holiday?)")
+            return 1
+        typer.echo(
+            f"bars:         {summary.bars} from {to_ist(summary.first):%H:%M} to "
+            f"{to_ist(summary.last):%H:%M} IST"
+        )
+        with svc.engine.begin() as conn:
+            eod = conn.execute(
+                select(eod_prices).where(
+                    eod_prices.c.trade_date == the_day,
+                    eod_prices.c.symbol == symbol.upper(),
+                    eod_prices.c.series == "EQ",
+                )
+            ).first()
+        if eod is None:
+            typer.echo(f"no NSE EOD row for {symbol} on {the_day} to compare with")
+            return 0
+        failures = 0
+        for name, ours, theirs, agrees in eod_check(
+            summary, open=eod.open, high=eod.high, low=eod.low, volume=eod.volume
+        ):
+            failures += not agrees
+            typer.echo(f"  {name:7} bars {ours}  NSE EOD {theirs}  {'ok' if agrees else 'DIFFERS'}")
+        return 1 if failures else 0
+
+
+bars_app = typer.Typer(no_args_is_help=True, help="One-minute bars (M5).")
+app.add_typer(bars_app, name="bars")
+
+
+def _bar_key(conn: Any, symbol: str | None, key: str | None) -> str:
+    from gats.marketdata.upstox import key_for_symbol
+
+    if key:
+        return key
+    if not symbol:
+        raise typer.BadParameter("give --symbol or --key")
+    found = key_for_symbol(conn, symbol)
+    if found is None:
+        typer.echo(f"no ISIN for {symbol} yet: run `gats probe instruments` first")
+        raise typer.Exit(1)
+    return found
+
+
+@bars_app.command("fetch")
+def bars_fetch(
+    start: Annotated[str, typer.Option(help="First day, YYYY-MM-DD (its whole month).")],
+    end: Annotated[str, typer.Option(help="Last day, YYYY-MM-DD (its whole month).")],
+    symbol: Annotated[str | None, typer.Option(help="NSE symbol.")] = None,
+    key: Annotated[str | None, typer.Option(help="Upstox instrument key instead.")] = None,
+    force: Annotated[bool, typer.Option(help="Refetch complete months.")] = False,
+) -> None:
+    """Fetch one-minute bars month by month (resumable; needs the Analytics Token)."""
+    from gats.marketdata.bars import months
+    from gats.marketdata.upstox import TokenMissing, fetch_month
+
+    settings = _settings()
+
+    async def main() -> int:
+        async with _services(settings) as svc:
+            with svc.engine.begin() as conn:
+                instrument = _bar_key(conn, symbol, key)
+            failed = 0
+            for month in months(_parse_day(start), _parse_day(end)):
+                try:
+                    result = await fetch_month(svc, instrument, month, force=force)
+                except TokenMissing as exc:
+                    typer.echo(str(exc))
+                    return 1
+                failed += result.status == "failed"
+                note = f" ({result.error})" if result.error else ""
+                typer.echo(f"{instrument} {month:%Y-%m}: {result.status}, {result.bars} bars{note}")
+            return 1 if failed else 0
+
+    raise typer.Exit(asyncio.run(main()))
+
+
+@bars_app.command("show")
+def bars_show(
+    day: Annotated[str, typer.Option("--date", help="YYYY-MM-DD.")],
+    symbol: Annotated[str | None, typer.Option(help="NSE symbol.")] = None,
+    key: Annotated[str | None, typer.Option(help="Upstox instrument key instead.")] = None,
+) -> None:
+    """One day's stored bars: count, first and last minute, OHLC, volume."""
+    from gats.marketdata.bars import read_bars, summarize
+
+    settings = _settings(log_to_file=False)
+    engine = make_engine(settings.resolved_db_url)
+    init_db(engine)
+    with engine.begin() as conn:
+        instrument = _bar_key(conn, symbol, key)
+    the_day = _parse_day(day)
+    bars = read_bars(
+        settings.bars_dir,
+        instrument,
+        ist_datetime(the_day, time()),
+        ist_datetime(the_day + timedelta(days=1), time()),
+    )
+    summary = summarize(bars)
+    if summary is None:
+        typer.echo(f"no bars stored for {instrument} on {the_day}")
+        raise typer.Exit(1)
+    typer.echo(
+        f"{instrument} {the_day}: {summary.bars} bars {to_ist(summary.first):%H:%M}-"
+        f"{to_ist(summary.last):%H:%M} IST  O {summary.open} H {summary.high} "
+        f"L {summary.low} C {summary.close}  V {summary.volume:,}"
+    )

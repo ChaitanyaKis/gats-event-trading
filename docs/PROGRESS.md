@@ -4,8 +4,8 @@ Claude Code updates this after every task. Newest log entry first.
 
 ## Status
 
-- **Version:** 0.2.0 · **Schema:** v6 · **Milestone:** M3 (M1 waits only on T1.6, HUMAN)
-- **Next up:** M5 T5.1 prep (verify Upstox docs, list the keys) and M6 T6.1 Cost model. Waiting on the human: M3's real run (item 3), T4.6 metrics (labels, item 5)
+- **Version:** 0.2.0 · **Schema:** v7 · **Milestone:** M3 (M1 waits only on T1.6, HUMAN)
+- **Next up:** M5 T5.2 Event-window bars (code; the real run needs the token, item 6, and the backfill, item 3). Then T5.3 code + pre-registration, then M6 (T6.1 cost model onwards). Waiting on the human: M3 run (3), labels (5), Upstox token (6)
 
 ## Waiting on the human (HUMAN)
 
@@ -70,6 +70,23 @@ are PowerShell, run from `C:\Projects\GATS`.
    Then type `/gats`: Claude commits `labels\order_win_v1.jsonl` and runs
    T4.6 (rules vs LLM vs cascade).
 
+6. **T5.1 Upstox Analytics Token** (5 minutes; needs an Upstox account).
+   It is read-only (it cannot trade), valid for a year, and needs no daily
+   login. Open https://account.upstox.com/developer/apps#analytics, go to
+   the **Analytics** tab, click **Generate Token**, confirm, and copy the
+   whole token with the clipboard icon. Add one line to `C:\Projects\GATS\.env`
+   (Claude never reads that file):
+   ```
+   GATS_UPSTOX_ANALYTICS_TOKEN=<paste the token>
+   ```
+   Check it, then send back the last lines of the output:
+   ```powershell
+   cd C:\Projects\GATS
+   .venv\Scripts\gats probe instruments
+   .venv\Scripts\gats probe upstox-candles --symbol RELIANCE --date 2026-10-01
+   ```
+   (`ok` on open, high and low means the bars match NSE's own end-of-day file.)
+
 ## Blocked
 
 (none)
@@ -81,7 +98,7 @@ are PowerShell, run from `C:\Projects\GATS`.
 - [x] M2 Reference data & entity resolution (0.2.0): T2.1 ✅ · T2.2 ✅ · T2.3 ✅ · T2.4 ✅ · T2.5 ✅ · T2.6 ✅ · T2.7 ✅ · T2.8 ✅ · T2.9 ✅
 - [ ] M3 Event study (G1 kill test): T3.0 ⏳ (human) · T3.1 ⚠️ · T3.2 ✅ · T3.3 ✅ · T3.4 ✅ (code; real run ⏳ backfill) · T3.5 ⏳ (gate, after the real run)
 - [ ] M4 LLM extraction (infrastructure for ORDER_WIN; scope confirmed at G1): T4.1 ✅ · T4.2 ✅ · T4.3 ✅ · T4.4 ✅ · T4.5 ⏳ (code ✅; labels: human) · T4.6 · T4.7
-- [ ] M5 Intraday data & reaction curves (G1b)
+- [ ] M5 Intraday data & reaction curves (G1b): T5.1 ⏳ (code ✅; token: human, item 6) · T5.2 · T5.3 · T5.4
 - [ ] M6 Backtester (G2)
 - [ ] M7 Paper trading (G3)
 - [ ] M8 Live pilot (G4, human-only)
@@ -97,6 +114,13 @@ are PowerShell, run from `C:\Projects\GATS`.
 ## Log
 
 - **2026-10-03:**
+  - T5.1 code done (the probe waits on the token, item 6). `gats.sources.upstox` (instrument
+    file VERIFIED: equity keys are ISINs; candle reply DOCUMENTED, not probed),
+    `gats.marketdata` (Parquet per instrument-month, atomic merge-on-write, DuckDB reads,
+    times as epoch microseconds because tz-aware conversion needs tzdata/pytz on
+    Windows), `bar_months` (schema v7), `gats bars fetch|show`, and a probe that checks a
+    day's bars against NSE's EOD row. Auth uses Upstox's read-only Analytics Token (1 year,
+    no daily login, cannot trade) instead of the daily OAuth token.
   - T4.5 code done (labelling is the human's, item 5). Held-out sample: NSE filings of
     2026-06-01 → 2026-08-31 (backfilled and read for this; 570 documents, 562 with text), never seen while the
     rules were built. `gats label sample` drew 330 of 562 documents, stratified by

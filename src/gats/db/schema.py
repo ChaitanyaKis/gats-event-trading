@@ -35,7 +35,7 @@ from sqlalchemy import (
 
 from gats.db.types import UTCDateTime
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 metadata = MetaData(
     naming_convention={
@@ -498,4 +498,21 @@ extractions = Table(
     Column("confidence", Float, nullable=False),
     Column("created_at", UTCDateTime, nullable=False),
     Index(None, "extractor_version", "event_type"),
+)
+
+# One-minute bars are Parquet files (M5); this records which instrument-
+# months were fetched, so fetching is resumable. The current month stays
+# "partial" until it is over.
+bar_months = Table(
+    "bar_months",
+    metadata,
+    Column("instrument_key", String(64), primary_key=True),
+    Column("month", Date, primary_key=True),  # its first day
+    Column("interval", String(8), primary_key=True),  # "1m"
+    Column("status", String(16), nullable=False),  # complete | partial | failed
+    Column("n_bars", Integer),
+    Column("attempts", Integer, nullable=False),
+    Column("raw_doc_id", String(64)),
+    Column("last_error", Text),
+    Column("updated_at", UTCDateTime, nullable=False),
 )

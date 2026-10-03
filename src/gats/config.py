@@ -13,7 +13,7 @@ from __future__ import annotations
 from datetime import time
 from pathlib import Path
 
-from pydantic import Field
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _DEFAULT_UA = (
@@ -35,8 +35,12 @@ class Settings(BaseSettings):
     http_timeout_s: float = Field(default=20.0, gt=0)
     min_request_interval_s: float = Field(default=1.0, ge=0)
     # Slower per-host overrides. BSE's API throttled bursts on 2026-09-28.
+    # Upstox allows 2,000 requests per 30 minutes per API and user (docs,
+    # checked 2026-10-03): one a second stays under it.
     # Env var takes JSON: GATS_HOST_MIN_INTERVAL_S='{"api.bseindia.com": 3}'
-    host_min_interval_s: dict[str, float] = Field(default_factory=lambda: {"api.bseindia.com": 2.0})
+    host_min_interval_s: dict[str, float] = Field(
+        default_factory=lambda: {"api.bseindia.com": 2.0, "api.upstox.com": 1.0}
+    )
     max_retries: int = Field(default=4, ge=0)
     backoff_base_s: float = Field(default=2.0, gt=0)
     backoff_max_s: float = Field(default=60.0, gt=0)
@@ -182,6 +186,15 @@ class Settings(BaseSettings):
     llm_model: str = "qwen2.5-coder:7b-instruct-q4_K_M"
     llm_timeout_s: float = Field(default=300.0, gt=0)
     llm_max_chars: int = Field(default=8000, ge=1000)  # facts sit in the first pages
+    # Upstox market data (M5). The instrument file needs no login (verified
+    # 2026-10-03). Candles need the read-only Analytics Token (valid a year,
+    # generated at account.upstox.com/developer/apps#analytics): a secret,
+    # set in .env only, never printed (SecretStr).
+    upstox_api_base: str = "https://api.upstox.com"
+    upstox_instruments_url: str = (
+        "https://assets.upstox.com/market-quote/instruments/exchange/NSE.json.gz"
+    )
+    upstox_analytics_token: SecretStr | None = None
     # Event taxonomy (versioned YAML, relative to the working directory).
     taxonomy_path: Path = Path("configs/event_taxonomy.yaml")
     classify_poll_s: float = Field(default=120.0, gt=0)
@@ -222,6 +235,11 @@ class Settings(BaseSettings):
     @property
     def logs_dir(self) -> Path:
         return self.data_dir / "logs"
+
+    @property
+    def bars_dir(self) -> Path:
+        """Parquet bars (M5): too many rows for the database."""
+        return self.data_dir / "bars"
 
     @property
     def heartbeat_path(self) -> Path:

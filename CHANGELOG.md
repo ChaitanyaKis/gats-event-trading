@@ -1,7 +1,15 @@
 # Changelog
 
 ## Unreleased
-Schema v6 (new tables only), upgraded automatically.
+Schema v7 (new tables only), upgraded automatically.
+
+- **One-minute bars (groundwork):** `gats probe upstox-instruments` reads
+  Upstox's public instrument file; with the read-only Analytics Token in
+  `.env` (`GATS_UPSTOX_ANALYTICS_TOKEN`), `gats bars fetch` stores
+  1-minute bars as Parquet under `data/bars/` month by month (resumable),
+  `gats bars show` summarises a day, and `gats probe upstox-candles`
+  checks a day's bars against NSE's end-of-day file. New optional
+  dependency (extra `research`): duckdb.
 
 - **Labelling:** `gats label sample` draws a held-out, stratified evaluation
   sample of order wins (committed before labelling); `gats label review`
