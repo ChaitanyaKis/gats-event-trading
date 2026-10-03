@@ -1,0 +1,75 @@
+# M5 intraday reaction study: the machine-readable half of
+# docs/research/M5_prereg.md.
+#
+# Pre-registered. The engine refuses to run unless this file's hash equals
+# the one recorded in the pre-registration; any change is a new study and a
+# new trial.
+
+study: m5-intraday-reaction
+taxonomy_version: taxonomy-v1+6f16e1c9
+
+data:
+  source: NSE
+  start: 2022-01-01                # the broker's one-minute bars begin in January 2022
+  end: 2026-09-30
+  train_end: 2023-12-31
+  test_start: 2024-01-01           # the holdout: used once, for G1b
+
+events:
+  # M3's confirmatory types. The run's scope is the subset in scope after
+  # G1; it is fixed and logged before any bar-based return is computed.
+  confirmatory: [ORDER_WIN, RATING_UP, BUYBACK, BONUS_SPLIT, PRESS_RELEASE]
+  exploratory: []
+  exclude_categories: ["Daily Buy Back of equity shares", "Closure of Buy Back",
+                       "Post Buyback Public Announcement"]
+  minute_precision_delay_s: 60
+  same_type_cooldown_sessions: 5
+
+entry:
+  # Decision time = availability + feed latency + allowances. Feed latency
+  # is measured, not assumed: this percentile of (first seen - exchange
+  # dissemination) over our own live recording.
+  latency_percentile: 95
+  latency_lookback_days: 30
+  latency_min_filings: 500         # fewer live filings than this: the run is refused
+  processing_allowance_s: 20       # text and fact extraction (the local LLM needs ~18 s)
+  order_allowance_s: 5
+  cutoff_ist: "15:00"              # later decisions trade at the next session's open
+  max_wait_minutes: 5              # the entry bar must start this soon after the earliest minute
+
+exits:                             # confirmatory; minutes after the entry bar's start
+  - {name: m5, minutes: 5}
+  - {name: m15, minutes: 15}
+  - {name: m30, minutes: 30}
+  - {name: m60, minutes: 60}
+  - {name: close, at: square_off}
+
+extra_exits:                       # reported, never eligible to pass
+  - {name: m1, minutes: 1}
+  - {name: next_close, at: next_close}
+
+square_off_ist: "15:20"
+
+benchmark:
+  index: Nifty 500                 # one-minute index bars over the same window
+  model: market_adjusted
+
+filters:
+  series: [EQ]
+  min_median_turnover_rs: 10000000 # 20-session median traded value before entry, Rs 1 crore
+  turnover_lookback_sessions: 20
+  min_prev_close_rs: 10
+  skip_locked_entry_bar: true      # a flat entry bar at the day's high: no buy possible
+
+costs:
+  cost_file: configs/costs/india_equity.yaml   # verified rates (T6.1), latest regime
+  notional_rs: 50000               # the trade size the charges are computed for
+  slippage_bps_per_side: 5         # an assumption; 0 and 10 are reported as sensitivity
+
+statistics:
+  cluster: event_date
+  bootstrap_resamples: 10000
+  bootstrap_seed: 20261003
+  fdr: {method: benjamini-hochberg, q: 0.05, family: types in scope x confirmatory exits}
+  ci: fcr_adjusted
+  min_test_events: 100
