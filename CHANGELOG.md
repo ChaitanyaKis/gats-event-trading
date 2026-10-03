@@ -47,6 +47,9 @@ Schema v8 (new tables only), upgraded automatically.
   the stock and the Nifty 500, resumably and capped with `--limit`;
   `gats bars coverage` reports the share of events fully covered.
 
+- **Extraction accuracy:** `gats extract evaluate` scores the rules, the LLM
+  and the cascade against the human labels and writes
+  `reports/M4_extraction.md`.
 - **Labelling:** `gats label sample` draws a held-out, stratified evaluation
   sample of order wins (committed before labelling); `gats label review`
   shows each filing's summary, every amount in context and one proposal

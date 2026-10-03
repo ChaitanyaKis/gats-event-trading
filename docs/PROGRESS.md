@@ -5,7 +5,7 @@ Claude Code updates this after every task. Newest log entry first.
 ## Status
 
 - **Version:** 0.2.0 · **Schema:** v8 · **Milestone:** M3 (M1 waits only on T1.6, HUMAN)
-- **Next up:** T4.6 metrics code (labels: item 5), then the T5.3 pre-registration and reaction-curve code, T4.7 revenue-source probe, M7 paper runtime. T5.3 waits for live latency (recorder, item 1). Waiting on the human: recorder (1), M3 run (3), labels (5), Upstox token (6)
+- **Next up:** T5.3 pre-registration and reaction-curve code, then the T4.7 revenue-source probe and the M7 paper runtime. T5.3 waits for live latency (recorder, item 1). Waiting on the human: recorder (1), M3 run (3), labels (5), Upstox token (6)
 
 ## Waiting on the human (HUMAN)
 
@@ -68,7 +68,7 @@ are PowerShell, run from `C:\Projects\GATS`.
    .venv\Scripts\gats label stats     # progress; the target is 300 labelled
    ```
    Then type `/gats`: Claude commits `labels\order_win_v1.jsonl` and runs
-   T4.6 (rules vs LLM vs cascade).
+   T4.6 (`gats extract evaluate`: rules vs LLM vs cascade, `reports\M4_extraction.md`).
 
 6. **T5.1 Upstox Analytics Token** (5 minutes; needs an Upstox account).
    It is read-only (it cannot trade), valid for a year, and needs no daily
@@ -95,7 +95,7 @@ are PowerShell, run from `C:\Projects\GATS`.
 - [ ] M1 finishing: T1.1 ✅ · T1.2 ✅ · T1.3 ✅ · T1.4 ✅ · T1.5 ✅ · T1.6
 - [x] M2 Reference data & entity resolution (0.2.0): T2.1 ✅ · T2.2 ✅ · T2.3 ✅ · T2.4 ✅ · T2.5 ✅ · T2.6 ✅ · T2.7 ✅ · T2.8 ✅ · T2.9 ✅
 - [ ] M3 Event study (G1 kill test): T3.0 ⏳ (human) · T3.1 ⚠️ · T3.2 ✅ · T3.3 ✅ · T3.4 ✅ (code; real run ⏳ backfill) · T3.5 ⏳ (gate, after the real run)
-- [ ] M4 LLM extraction (infrastructure for ORDER_WIN; scope confirmed at G1): T4.1 ✅ · T4.2 ✅ · T4.3 ✅ · T4.4 ✅ · T4.5 ⏳ (code ✅; labels: human) · T4.6 · T4.7
+- [ ] M4 LLM extraction (infrastructure for ORDER_WIN; scope confirmed at G1): T4.1 ✅ · T4.2 ✅ · T4.3 ✅ · T4.4 ✅ · T4.5 ⏳ (code ✅; labels: human) · T4.6 ⏳ (code ✅; needs the labels) · T4.7
 - [ ] M5 Intraday data & reaction curves (G1b): T5.1 ⏳ (code ✅; token: human, item 6) · T5.2 ⏳ (code ✅; the fetch needs the token) · T5.3 · T5.4
 - [ ] M6 Backtester (G2): T6.1 ⏳ (model ✅; broker-calculator check needs the token, item 6) · T6.2 ✅ · T6.3 ✅ · T6.4 ✅ · T6.5 ✅ · T6.6 ✅ · T6.7 ✅ · T6.8 ⏳ (code ✅; the G2 run needs bars, events and T4.7's revenue feature)
 - [ ] M7 Paper trading (G3)
@@ -112,6 +112,12 @@ are PowerShell, run from `C:\Projects\GATS`.
 ## Log
 
 - **2026-10-03:**
+  - T4.6 code done (it needs the labels, item 5). `gats extract evaluate` scores rules, LLM
+    and cascade on the labelled new orders: amount within 1% with a Wilson interval, misses
+    split into abstained and wrong, counterparty, domestic/export, duration, repeat; the
+    share of labelled items that are new orders (taxonomy precision); and the anchoring
+    check (accuracy where an extractor's own proposal was shown vs not). It refuses to
+    score if the LLM gives no answer, and states the 90% acceptance mechanically.
   - T6.8 groundwork done (the G2 run itself waits on data). `gats.backtest.feed` (events
     with extracted facts, bars from the Parquet files, liquidity and surveillance lookups
     that read only before the day asked about; surveillance is "unknown" before its

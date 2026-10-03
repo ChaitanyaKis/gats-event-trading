@@ -1913,3 +1913,56 @@ def backtest_run(
         f"experiment #{run_id}: {metrics.trades} trades, net Rs {metrics.net_pnl:,.2f}; "
         f"G2: {g2_verdict(checks)} -> {report}"
     )
+
+
+@extract_app.command("evaluate")
+def extract_evaluate(
+    sample_path: SamplePath = _SAMPLE,
+    labels_path: LabelsPath = _LABELS,
+    report: Annotated[Path, typer.Option(help="Where to write the report.")] = Path(
+        "reports/M4_extraction.md"
+    ),
+    llm: Annotated[bool, typer.Option(help="Also score the LLM and the cascade.")] = True,
+) -> None:
+    """Score the rules, the LLM and the cascade against the human labels (T4.6)."""
+    from gats.extract.cascade import code_hash, extractor_version
+    from gats.extract.evaluate import LlmUnavailable, evaluate, predict, render
+    from gats.extract.labels import TARGET_LABELS, load_labels
+    from gats.extract.llm import prompt_hash
+
+    sample = _load_sample(sample_path)
+    in_sample = {item.doc_id for item in sample.items}
+    records = [r for doc, r in load_labels(labels_path).items() if doc in in_sample]
+    labelled = [r for r in records if r.get("status") == "labelled"]
+    if not labelled:
+        typer.echo(f"no labels in {labels_path} yet: run `gats label review`")
+        raise typer.Exit(1)
+    settings = _settings()
+
+    async def main() -> Any:
+        async with _services(settings) as svc:
+            return await predict(svc, labelled, use_llm=llm)
+
+    try:
+        predictions = asyncio.run(main())
+    except LlmUnavailable as exc:
+        typer.echo(f"{exc}. Start Ollama (or run `gats label prepare`), or pass --no-llm.")
+        raise typer.Exit(1) from exc
+    result = evaluate(labelled, predictions)
+    prompt = prompt_hash(settings.llm_max_chars)
+    versions = {
+        "rules": extractor_version("rules", prompt, settings.llm_model),
+        "llm": extractor_version("llm", prompt, settings.llm_model),
+        "code": code_hash(),
+    }
+    report.parent.mkdir(parents=True, exist_ok=True)
+    report.write_text(
+        render(result, target_labels=TARGET_LABELS, versions=versions),
+        encoding="utf-8",
+        newline="\n",
+    )
+    for method, score in result.scores.items():
+        accuracy = score.accuracy("amount")
+        shown = "n/a" if accuracy is None else f"{accuracy:.1%}"
+        typer.echo(f"{method:8} amount within 1%: {shown} of {score.n} new orders")
+    typer.echo(f"{result.labelled} labels -> {report}")
