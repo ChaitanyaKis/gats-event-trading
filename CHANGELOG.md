@@ -10,6 +10,10 @@ Schema v8 (new tables only), upgraded automatically.
   `gats bars show` summarises a day, and `gats probe upstox-candles`
   checks a day's bars against NSE's end-of-day file. New optional
   dependency (extra `research`): duckdb.
+- **Intraday reaction study:** `gats research reaction --scope TYPE` runs the
+  pre-registered M5 study (entry after measured feed latency, verified
+  costs) and writes `reports/M5_reaction_curves.md` with the G1b decision.
+  It refuses an edited config, missing bars or unmeasured latency.
 - **Backtest command:** `gats backtest run --start D --end D` runs a
   registered backtest over stored events and bars (risk limits and verified
   costs applied) and writes `reports/M6_backtest.md`, judging gate G2's

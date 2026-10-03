@@ -54,6 +54,7 @@ def event_windows(
     minute_precision_delay_s: int = 60,
     data_start: date = FIRST_MINUTE_DATA,
     current_isins: Collection[str] = (),
+    exclude_categories: Collection[str] = (),
 ) -> tuple[list[EventWindow], Counter[str]]:
     """Windows for filings available on IST dates [start, end], and how many
     were dropped for each reason. ``current_isins`` (listed today) settle
@@ -62,6 +63,7 @@ def event_windows(
     resolver = clock.resolver()
     windows: list[EventWindow] = []
     dropped: Counter[str] = Counter()
+    excluded = {c.lower() for c in exclude_categories}
     rows = clock.typed_filings(
         ist_datetime(start, time()),
         ist_datetime(end + timedelta(days=1), time()),
@@ -70,6 +72,9 @@ def event_windows(
     )
     for row in rows:
         if row.event_type not in event_types:
+            continue
+        if (row.category or "").lower() in excluded or (row.subject or "").lower() in excluded:
+            dropped["excluded_category"] += 1
             continue
         if row.security_id is None:
             dropped["unlinked"] += 1

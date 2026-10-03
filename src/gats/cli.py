@@ -1037,9 +1037,9 @@ def _write_m3_report(
         fingerprint=fingerprint,
         figure="figures/m3_car.png",
     )
-    from gats.research.report import _cells_for
+    from gats.research.report import cells_for
 
-    cells, _ = _cells_for(rows, cfg)
+    cells, _ = cells_for(rows, cfg)
     car_plot(cells, cfg, figure)
     reports.mkdir(parents=True, exist_ok=True)
     (reports / "M3_event_study.md").write_bytes(text.encode("utf-8"))
@@ -1966,3 +1966,129 @@ def extract_evaluate(
         shown = "n/a" if accuracy is None else f"{accuracy:.1%}"
         typer.echo(f"{method:8} amount within 1%: {shown} of {score.n} new orders")
     typer.echo(f"{result.labelled} labels -> {report}")
+
+
+@research_app.command("reaction")
+def research_reaction(
+    scope: Annotated[
+        list[str],
+        typer.Option("--scope", help="Type in scope after G1; repeat for more. Logged."),
+    ],
+    config: Annotated[Path, typer.Option(help="Study config (YAML).")] = Path(
+        "configs/studies/m5_reaction.yaml"
+    ),
+    prereg: Annotated[
+        Path, typer.Option(help="Pre-registration recording the config's hash.")
+    ] = Path("docs/research/M5_prereg.md"),
+    report: Annotated[Path, typer.Option(help="Where to write the report.")] = Path(
+        "reports/M5_reaction_curves.md"
+    ),
+) -> None:
+    """Run the pre-registered M5 intraday reaction study (gate G1b).
+
+    Refuses unless the config is the registered one, bars cover the events,
+    and feed latency can be measured from live recording.
+    """
+    from sqlalchemy import func
+
+    from gats.backtest.costs import CostModel
+    from gats.db.schema import experiments
+    from gats.marketdata.upstox import current_isins
+    from gats.marketdata.windows import bars_per_day, event_windows, window_coverage
+    from gats.research.event_study import write_parquet
+    from gats.research.reaction import (
+        NotReady,
+        measured_delay,
+        run_reaction_study,
+        verify_reaction,
+    )
+    from gats.research.reaction_report import build_reaction_report
+    from gats.research.registry import experiment
+    from gats.research.runs import stamp
+    from gats.research.study import RegistrationError
+
+    settings = _settings()
+    try:
+        cfg, digest = verify_reaction(config, prereg)
+    except RegistrationError as exc:
+        typer.echo(f"REFUSED: {exc}")
+        raise typer.Exit(1) from exc
+    outside = sorted(set(scope) - set(cfg.events.confirmatory))
+    if outside:
+        typer.echo(f"REFUSED: {outside} are not confirmatory types of this study")
+        raise typer.Exit(1)
+    index_key = f"NSE_INDEX|{cfg.benchmark.index}"
+    costs = CostModel.load(cfg.costs.cost_file)
+    db = make_engine(settings.resolved_db_url)
+    init_db(db)
+    now = utcnow()
+    with db.begin() as conn:
+        clock = AsOf(conn, now)
+        windows, _ = event_windows(
+            clock,
+            event_types=set(scope),
+            taxonomy_version=cfg.taxonomy_version,
+            start=cfg.data.start,
+            end=cfg.data.end,
+            source=cfg.data.source,
+            current_isins=current_isins(conn),
+            exclude_categories=cfg.events.exclude_categories,
+        )
+        coverage = window_coverage(windows, bars_per_day(settings.bars_dir), index_key)
+        try:
+            if coverage.share < 0.95:
+                raise NotReady(
+                    f"bars cover {coverage.covered}/{coverage.events} in-scope events "
+                    f"({coverage.share:.1%}; the study needs 95%): run `gats bars events`"
+                )
+            delay = measured_delay(conn, cfg, now)
+            median_delay = measured_delay(conn, cfg, now, percentile=50)
+        except NotReady as exc:
+            typer.echo(f"NOT READY: {exc}")
+            raise typer.Exit(1) from exc
+        m3_run = conn.execute(
+            select(func.min(experiments.c.started_at)).where(
+                experiments.c.kind == "event_study", experiments.c.status == "done"
+            )
+        ).scalar()
+        registered = experiment(
+            db,
+            kind="reaction_study",
+            name=cfg.study,
+            params_hash=digest,
+            params={"scope": sorted(scope), "delay_s": delay.total_s, "feed_s": delay.feed_s},
+            data_start=cfg.data.start,
+            data_end=cfg.data.end,
+            holdout=True,  # the study reads its test period
+        )
+        with registered as run:
+            rows = run_reaction_study(
+                clock, cfg, settings.bars_dir, delay_s=delay.total_s, scope=scope,
+                costs=costs, index_key=index_key,
+            )  # fmt: skip
+            median_rows = run_reaction_study(
+                clock, cfg, settings.bars_dir, delay_s=median_delay.total_s, scope=scope,
+                costs=costs, index_key=index_key,
+            )  # fmt: skip
+            run.metrics = {"events": len(rows)}
+    db.dispose()
+    run_id = stamp()
+    out = settings.data_dir / "research" / cfg.study / run_id
+    write_parquet(rows, out / "events.parquet")
+    text, family = build_reaction_report(
+        rows,
+        cfg,
+        digest=digest,
+        run_id=run_id,
+        experiment_id=run.id,
+        scope=scope,
+        delay=delay,
+        median_rows=median_rows,
+        median_delay=median_delay,
+        m3_run_date=to_ist(m3_run).date() if m3_run else None,
+    )
+    report.parent.mkdir(parents=True, exist_ok=True)
+    report.write_text(text, encoding="utf-8", newline="\n")
+    passed = [f"{c.event_type}/{c.exit}" for c in family if c.passes]
+    typer.echo(f"run {run_id}: {len(rows)} events -> {out / 'events.parquet'}")
+    typer.echo(f"G1b: {'PASS ' + ', '.join(passed) if passed else 'nothing passes'} -> {report}")

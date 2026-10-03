@@ -10,10 +10,11 @@ from __future__ import annotations
 
 import math
 from collections import Counter, defaultdict
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 from gats.research.stats import (
     bh_adjust,
@@ -21,7 +22,34 @@ from gats.research.stats import (
     clustered_mean,
     fcr_lower_bound,
 )
-from gats.research.study import StudyConfig
+from gats.research.study import StatSpec, StudyConfig
+
+
+class _Named(Protocol):
+    @property
+    def name(self) -> str: ...
+
+
+class _Confirmatory(Protocol):
+    @property
+    def confirmatory(self) -> list[str]: ...
+
+
+class GateConfig(Protocol):
+    """What the gate rule reads from a study config (M3's and M5's fit)."""
+
+    @property
+    def events(self) -> _Confirmatory: ...
+
+    @property
+    def event_types(self) -> list[str]: ...
+
+    @property
+    def exits(self) -> Sequence[_Named]: ...
+
+    @property
+    def statistics(self) -> StatSpec: ...
+
 
 # Exploratory liquidity buckets (20-session median traded value, Rs), fixed
 # in code before the first real run; not part of the G1 rule.
@@ -59,8 +87,8 @@ class Cell:
 Key = tuple[str, str, str]  # (event type, exit, period)
 
 
-def _cells_for(
-    rows: list[dict[str, Any]], cfg: StudyConfig
+def cells_for(
+    rows: list[dict[str, Any]], cfg: GateConfig
 ) -> tuple[dict[Key, Cell], dict[Key, Any]]:
     """All cells, and each cell's bootstrap means (needed for FCR bounds)."""
     confirmatory = set(cfg.events.confirmatory)
@@ -107,8 +135,9 @@ def _quantile(values: Any, q: float) -> float:
     return float(np.quantile(values, q))
 
 
-def evaluate_g1(cells: dict[Key, Cell], boots: dict[Key, Any], cfg: StudyConfig) -> list[Cell]:
-    """Apply the pre-registered G1 rule to the confirmatory test cells."""
+def evaluate_g1(cells: dict[Key, Cell], boots: dict[Key, Any], cfg: GateConfig) -> list[Cell]:
+    """Apply the pre-registered gate rule (G1, and G1b with M5's config) to
+    the confirmatory test cells."""
     keys = [(t, x.name, "test") for t in cfg.events.confirmatory for x in cfg.exits]
     family = [cells[k] for k in keys]
     adjusted = bh_adjust([c.p for c in family])
@@ -214,7 +243,7 @@ def build_report(
     fingerprint: dict[str, Any],
     figure: str | None,
 ) -> tuple[str, list[Cell]]:
-    cells, boots = _cells_for(rows, cfg)
+    cells, boots = cells_for(rows, cfg)
     family = evaluate_g1(cells, boots, cfg)
     passing = [c for c in family if c.passes]
     counts: dict[str, Counter[str]] = defaultdict(Counter)
