@@ -38,6 +38,7 @@ _ANN_PARSED_FIELDS = (
     "subject",
     "details",
     "attachment_url",
+    "attachment_size",
     "exch_submitted_ts",
     "exch_disseminated_ts",
     "event_ts",
@@ -168,6 +169,23 @@ def raw_documents_of_kind(conn: Connection, kind: str) -> list[Row[Any]]:
         conn.execute(
             select(raw_documents)
             .where(raw_documents.c.kind == kind)
+            .order_by(raw_documents.c.first_fetched_at)
+        )
+    )
+
+
+def raw_documents_for_announcements(conn: Connection, source: str) -> list[Row[Any]]:
+    """Every payload some ``source`` announcement was parsed from.
+
+    The raw store is content-addressed, so a backfill that fetches bytes
+    identical to an earlier probe reuses the probe's document, whose kind
+    stays ``probe_*``. Selecting by kind alone would skip those rows.
+    """
+    referenced = select(announcements.c.raw_doc_id).where(announcements.c.source == source)
+    return list(
+        conn.execute(
+            select(raw_documents)
+            .where(raw_documents.c.doc_id.in_(referenced))
             .order_by(raw_documents.c.first_fetched_at)
         )
     )

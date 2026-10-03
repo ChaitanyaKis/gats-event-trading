@@ -87,6 +87,20 @@ class TestNse:
         assert record.exch_submitted_ts == datetime(2026, 9, 25, 4, 45, 30, tzinfo=UTC)
         assert record.event_ts == record.exch_disseminated_ts
 
+    @pytest.mark.parametrize(
+        ("raw", "expected"),
+        [
+            ("165.57 KB", round(165.57 * 1024)),
+            ("1.27 MB", round(1.27 * 1024**2)),
+            ("512 Bytes", 512),
+            ("0 Bytes", None),
+            ("", None),
+            ("n/a", None),
+        ],
+    )
+    def test_display_size(self, raw: str, expected: int | None) -> None:
+        assert nse.parse_display_size(raw) == expected
+
     def test_difference_consistent_with_timestamps_is_silent(self) -> None:
         result = nse.parse_announcements(json.dumps([nse_row("1", difference="00:00:01")]).encode())
         assert result.warnings == []

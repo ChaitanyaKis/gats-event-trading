@@ -755,6 +755,14 @@ def reparse_kind(svc: Services, kind: str) -> dict[str, int]:
     stats = {"documents": 0, "updated": 0, "inserted": 0, "errors": 0}
     with svc.engine.begin() as conn:
         docs = repo.raw_documents_of_kind(conn, kind)
+        if kind in (bse.KIND, nse.KIND):
+            seen = {d.doc_id for d in docs}
+            source = bse.SOURCE if kind == bse.KIND else nse.SOURCE
+            docs += [
+                d
+                for d in repo.raw_documents_for_announcements(conn, source)
+                if d.doc_id not in seen
+            ]
     for doc in docs:
         stats["documents"] += 1
         payload = svc.store.get(doc.doc_id)

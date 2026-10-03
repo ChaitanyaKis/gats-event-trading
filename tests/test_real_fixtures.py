@@ -72,6 +72,9 @@ class TestBseReal:
     ) -> None:
         urls = [r.attachment_url for r in parsed.records if r.attachment_url]
         assert len(urls) >= 25
+        # Fld_Attachsize is exact bytes; the first row's PDF is 8,889,958 bytes.
+        assert parsed.records[0].attachment_size == 8889958
+        assert all(r.attachment_size for r in parsed.records if r.attachment_url)
         assert all(u.startswith(LIVE) and u.lower().endswith(".pdf") for u in urls)
 
     def test_unmapped_fields_match_data_sources_doc(
@@ -86,7 +89,6 @@ class TestBseReal:
             "criticalnews",
             "datainsdate",
             "filestatus",
-            "fld_attachsize",
             "investor_presentation",
             "more",
             "nsurl",
@@ -142,14 +144,17 @@ class TestNseReal:
         self, parsed: ParseResult[AnnouncementRecord]
     ) -> None:
         assert set(parsed.meta["unknown_fields"]) == {
-            "attfilesize",
             "bflag",
             "csvname",
-            "filesize",
             "hasxbrl",
             "old_new",
             "orgid",
         }
+
+    def test_attachment_sizes(self, parsed: ParseResult[AnnouncementRecord]) -> None:
+        # First row: "31.78 KB" -> 31.78 * 1024 bytes.
+        assert parsed.records[0].attachment_size == round(31.78 * 1024)
+        assert sum(r.attachment_size is not None for r in parsed.records) >= 28
 
     def test_unique_ids(self, parsed: ParseResult[AnnouncementRecord]) -> None:
         ids = [r.source_ann_id for r in parsed.records]

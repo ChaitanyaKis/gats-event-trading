@@ -35,8 +35,9 @@ new source gets a row here before code depends on it.
   996 distinct rows = ROWCNT.
 - A day counts as complete only when every page was fetched **and** at
   least ROWCNT rows were collected (`backfill_days.expected_records`).
+- `Fld_Attachsize` → `attachment_size` (exact bytes; parser `bse-ann-v2`).
 - Unmapped: `agenda_id`, `announcement_type`, `audio_video_file`,
-  `bsenewsid`, `criticalnews`, `datainsdate`, `filestatus`, `fld_attachsize`,
+  `bsenewsid`, `criticalnews`, `datainsdate`, `filestatus`,
   `investor_presentation`, `more`, `nsurl`, `old`, `quarter_id`, `recordid`,
   `rn`, `timediff`, `xml_name`.
 
@@ -82,8 +83,12 @@ new source gets a row here before code depends on it.
   2025-04-08. Live rows carry the symbol of their day; backfilled rows carry
   the symbol of the backfill day. Resolve backfilled NSE symbols as of
   `first_seen_at` (`gats.refdata.symbols.SymbolHistory`) or through the ISIN.
-- Still unmapped (no research use yet): `attFileSize`/`fileSize` (identical
-  human-readable sizes such as `1.27 MB`; `0 Bytes` on 37 rows),
+- `attFileSize` → `attachment_size` in bytes (parser `nse-ann-v3`). It is a
+  display size (`165.57 KB`, `1.27 MB`; `0 Bytes` = unknown), so it is exact
+  only to the last shown digit. Verified 2026-10-03: for the same PDF filed
+  on both exchanges, BSE's exact `Fld_Attachsize` / 1024 rounds to NSE's
+  figure (169,542 bytes ↔ `165.57 KB`).
+- Still unmapped (no research use yet): `fileSize` (repeats `attFileSize`),
   `hasXbrl` (always `true`), `smIndustry` (null on 60%), and `bflag`,
   `csvName`, `old_new`, `orgid` (always null).
 

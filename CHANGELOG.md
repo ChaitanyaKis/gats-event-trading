@@ -1,7 +1,11 @@
 # Changelog
 
 ## Unreleased
-- **Filings linked to securities:** every announcement gets a
+- Announcements store the attachment size each exchange reports
+  (`attachment_size`, schema v5; parsers `bse-ann-v2`, `nse-ann-v3`). Run
+  `gats reparse bse_ann` and `gats reparse nse_ann` to fill older rows.
+- Fix: `gats reparse bse_ann|nse_ann` skipped rows whose payload had first
+  been stored by `gats probe` (identical bytes share one raw document).- **Filings linked to securities:** every announcement gets a
   `security_id` (`announcement_security`), kept current by new recorder jobs
   `master_build` (daily) and `link` (every minute). `gats refdata build` also
   links; `gats refdata coverage` reports the linked share per exchange and

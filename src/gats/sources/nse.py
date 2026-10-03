@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from datetime import date, timedelta
 from typing import Any
 
@@ -24,7 +25,7 @@ from gats.timeutil import parse_ist_datetime
 
 SOURCE = "NSE"
 KIND = "nse_ann"
-PARSER_VERSION = "nse-ann-v2"
+PARSER_VERSION = "nse-ann-v3"  # v3: attachment size
 
 KNOWN_FIELDS = frozenset(
     {
@@ -43,8 +44,29 @@ KNOWN_FIELDS = frozenset(
         # is used only as a consistency check.
         "dt",
         "difference",
+        # Display size of the attachment, e.g. "1.27 MB"; fileSize repeats it.
+        "attfilesize",
+        "filesize",
     }
 )
+
+_SIZE_RE = re.compile(r"^\s*([\d.]+)\s*(bytes|kb|mb|gb)\s*$", re.IGNORECASE)
+_UNITS = {"bytes": 1, "kb": 1024, "mb": 1024**2, "gb": 1024**3}
+
+
+def parse_display_size(raw: object) -> int | None:
+    """NSE's ``attFileSize`` ("165.57 KB", "1.27 MB") in bytes.
+
+    Verified 2026-10-03: for the same PDF on both exchanges, BSE's exact
+    ``Fld_Attachsize`` divided by 1024 (or 1024^2) rounds to NSE's figure,
+    e.g. 169,542 bytes vs "165.57 KB". "0 Bytes" means no usable size.
+    """
+    text = clean_str(raw)
+    match = _SIZE_RE.match(text) if text else None
+    if match is None:
+        return None
+    size = round(float(match.group(1)) * _UNITS[match.group(2).lower()])
+    return size or None
 
 
 def request_params(start: date, end: date) -> dict[str, str]:
@@ -155,6 +177,7 @@ def parse_announcements(payload: bytes) -> ParseResult[AnnouncementRecord]:
                 subject=clean_str(pick(row, "desc")),
                 details=clean_str(pick(row, "attchmntText")),
                 attachment_url=clean_str(pick(row, "attchmntFile")),
+                attachment_size=parse_display_size(pick(row, "attFileSize", "fileSize")),
                 exch_submitted_ts=received,
                 exch_disseminated_ts=disseminated,
                 event_ts=event_ts,

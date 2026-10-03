@@ -45,12 +45,18 @@ def _v3_to_v4(conn: Connection) -> None:
     """v4 only added reference-data tables, which create_all() has made."""
 
 
+def _v4_to_v5(conn: Connection) -> None:
+    # Filled by `gats reparse bse_ann` / `nse_ann` (parsers bse-ann-v2, nse-ann-v3).
+    _add_column_if_missing(conn, "announcements", "attachment_size", "BIGINT")
+
+
 # Upgrade steps keyed by the version they start from. Each must be additive
 # and safe to run on a database that create_all() has just touched.
 _UPGRADES: dict[int, Callable[[Connection], None]] = {
     1: _v1_to_v2,
     2: _v2_to_v3,
     3: _v3_to_v4,
+    4: _v4_to_v5,
 }
 
 

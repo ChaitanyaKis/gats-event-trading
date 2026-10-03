@@ -8,6 +8,7 @@ import respx
 from sqlalchemy import func, select
 
 from gats import ingest
+from gats.db import repo
 from gats.db.schema import (
     announcements,
     eod_prices,
@@ -347,6 +348,27 @@ class TestReparse:
         assert stats == {"documents": 1, "updated": 1, "inserted": 0, "errors": 0}
         assert after.available_at == before.available_at
         assert after.first_seen_at == before.first_seen_at
+
+    @respx.mock
+    async def test_reparse_covers_payloads_first_stored_by_a_probe(self, svc: Services) -> None:
+        # A probe stored these exact bytes first, so the shared raw document
+        # keeps kind probe_bse; the backfilled rows must still be reparsed.
+        payload = bse_payload([bse_row("p1", stamp(1))], row_count=1)
+        with svc.engine.begin() as conn:
+            repo.save_raw(
+                conn,
+                svc.store,
+                payload,
+                kind="probe_bse",
+                source="BSE",
+                url="u",
+                content_type=None,
+                fetched_at=svc.clock(),
+            )
+        bse_page({"pageno": "1"}).mock(return_value=httpx.Response(200, content=payload))
+        await ingest.backfill_day(svc, "BSE", date(2026, 9, 25), job="t", max_pages=5)
+        stats = ingest.reparse_kind(svc, "bse_ann")
+        assert stats == {"documents": 1, "updated": 1, "inserted": 0, "errors": 0}
 
 
 class TestNseSubset:

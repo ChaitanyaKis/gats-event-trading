@@ -29,6 +29,9 @@ class AnnouncementRecord:
     exch_submitted_ts: datetime | None
     exch_disseminated_ts: datetime | None
     event_ts: datetime | None
+    # Attachment size in bytes as the exchange reports it (BSE exact; NSE
+    # rounded for display). Lets the same PDF be recognised on both exchanges.
+    attachment_size: int | None = None
 
 
 @dataclass(frozen=True, slots=True)

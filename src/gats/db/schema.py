@@ -35,7 +35,7 @@ from sqlalchemy import (
 
 from gats.db.types import UTCDateTime
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 metadata = MetaData(
     naming_convention={
@@ -101,6 +101,7 @@ announcements = Table(
     Column("subject", Text),
     Column("details", Text),
     Column("attachment_url", Text),
+    Column("attachment_size", BigInteger),  # v5; see AnnouncementRecord
     Column("attachment_status", String(16), nullable=False),  # none|pending|done|missing|failed
     Column("attachment_attempts", Integer, nullable=False, default=0),
     Column("attachment_doc_id", String(64), ForeignKey("raw_documents.doc_id")),

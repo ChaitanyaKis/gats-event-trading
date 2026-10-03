@@ -21,7 +21,7 @@ from gats.timeutil import parse_ist_datetime
 
 SOURCE = "BSE"
 KIND = "bse_ann"
-PARSER_VERSION = "bse-ann-v1"
+PARSER_VERSION = "bse-ann-v2"  # v2: attachment size
 PAGE_SIZE = 50  # rows per page, verified 2026-09-26 and 2026-10-02
 
 # Fields the mapping below understands; anything else is reported by `probe`.
@@ -41,6 +41,7 @@ KNOWN_FIELDS = frozenset(
         "dissemdt",
         "news_submission_dt",
         "totalpagecnt",
+        "fld_attachsize",
     }
 )
 
@@ -139,6 +140,9 @@ def parse_announcements(payload: bytes, *, attachment_base: str) -> ParseResult[
                 subject=clean_str(pick(row, "NEWSSUB")),
                 details=clean_str(pick(row, "HEADLINE")),
                 attachment_url=attachment_base + attachment if attachment else None,
+                attachment_size=(to_int(pick(row, "Fld_Attachsize")) or None)
+                if attachment
+                else None,
                 exch_submitted_ts=submitted,
                 exch_disseminated_ts=disseminated,
                 event_ts=event_ts,
