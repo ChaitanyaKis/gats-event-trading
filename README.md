@@ -97,6 +97,7 @@ del .env                             # back to real endpoints
 | `gats doctor [--network]` | Health checks with a fix for each problem; `--network` makes one request per source. Exit code 1 on failure |
 | `gats backfill eod --start D --end D [--no-weekends]` | Load historical daily prices (resumable; weekends included for special sessions) |
 | `gats backfill indices --start D --end D` | Load historical index closes (resumable) |
+| `gats backfill results --type ORDER_WIN [--since D --limit N]` | Load quarterly results and revenue (XBRL) for companies with such filings (resumable) |
 | `gats backfill corporate-actions --start D --end D` | Load NSE corporate actions, a year per request |
 | `gats backfill announcements --source bse\|nse --start D --end D` | Load historical filings day by day (resumable) |
 | `gats reparse <kind>` | Re-run the current parser over stored raw payloads (`gats reparse --help` lists kinds) |

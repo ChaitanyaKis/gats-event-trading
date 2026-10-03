@@ -35,7 +35,7 @@ from sqlalchemy import (
 
 from gats.db.types import UTCDateTime
 
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 
 metadata = MetaData(
     naming_convention={
@@ -539,4 +539,34 @@ experiments = Table(
     Column("started_at", UTCDateTime, nullable=False),
     Column("finished_at", UTCDateTime),
     Index(None, "kind", "name"),
+)
+
+# Quarterly results filings and the revenue their XBRL states (T4.7). One row
+# per filing: a revised filing is a new row (the exchange's ``seq``), so what
+# was known at any moment can be read back. Rows without a dissemination time
+# (pre-2010s) are not stored: they could never be read point-in-time.
+financial_results = Table(
+    "financial_results",
+    metadata,
+    Column("symbol", String(64), primary_key=True),
+    Column("period_end", Date, primary_key=True),
+    Column("consolidated", Boolean, primary_key=True),
+    Column("seq", String(32), primary_key=True),
+    Column("regime", String(16), nullable=False),  # legacy | integrated
+    Column("period_start", Date),
+    Column("audited", Boolean, nullable=False),
+    Column("revised", Boolean, nullable=False),
+    Column("isin", String(12)),
+    Column("xbrl_url", Text),
+    Column("xbrl_status", String(16), nullable=False),  # pending | done | failed | none
+    Column("xbrl_attempts", Integer, nullable=False),
+    Column("xbrl_note", Text),
+    Column("xbrl_doc_id", String(64)),
+    Column("revenue", Float),  # RevenueFromOperations for the quarter, rupees
+    Column("event_ts", UTCDateTime, nullable=False),
+    Column("available_at", UTCDateTime, nullable=False),
+    Column("raw_doc_id", String(64), ForeignKey("raw_documents.doc_id"), nullable=False),
+    Column("parser_version", String(32), nullable=False),
+    Index(None, "symbol", "available_at"),
+    Index(None, "xbrl_status"),
 )

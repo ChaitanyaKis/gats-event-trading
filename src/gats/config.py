@@ -62,6 +62,13 @@ class Settings(BaseSettings):
         "https://nsearchives.nseindia.com/content/indices/ind_close_all_{ddmmyyyy}.csv"
     )
     nse_bands_url: str = "https://nsearchives.nseindia.com/content/equities/sec_list.csv"
+    # Quarterly results (verified 2026-10-03): the legacy index stops at the
+    # December 2024 quarter; later quarters are in the integrated-filing index.
+    nse_results_url: str = "https://www.nseindia.com/api/corporates-financial-results"
+    nse_integrated_results_url: str = "https://www.nseindia.com/api/integrated-filing-results"
+    nse_results_referer: str = (
+        "https://www.nseindia.com/companies-listing/corporate-filings-financial-results"
+    )
     nse_instruments_url: str = "https://nsearchives.nseindia.com/content/equities/EQUITY_L.csv"
     nse_symbol_changes_url: str = (
         "https://nsearchives.nseindia.com/content/equities/symbolchange.csv"

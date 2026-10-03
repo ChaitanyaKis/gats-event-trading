@@ -459,6 +459,68 @@ def backfill_corporate_actions(
     asyncio.run(main())
 
 
+@backfill_app.command("results")
+def backfill_results(
+    event_type: Annotated[
+        str, typer.Option("--type", help="Companies with filings of this type.")
+    ] = "ORDER_WIN",
+    since: Annotated[
+        str, typer.Option(help="Read revenue for quarters ending on or after this day.")
+    ] = "2021-01-01",
+    limit: Annotated[int, typer.Option(help="Most companies and most XBRL files this run.")] = 500,
+    refresh: Annotated[
+        bool, typer.Option(help="Ask again about companies already stored.")
+    ] = False,
+) -> None:
+    """Load quarterly results and their revenue for the companies behind an
+    event type (resumable: rerun to continue)."""
+    from gats.db.schema import announcement_event_types, announcement_security, financial_results
+    from gats.refdata.results import fetch_pending_xbrl, ingest_results_index
+
+    settings = _settings()
+    tax = _taxonomy(settings)
+
+    async def main() -> None:
+        async with _services(settings) as svc:
+            with svc.engine.begin() as conn:
+                resolver = AsOf(conn, utcnow()).resolver()
+                securities = conn.execute(
+                    select(announcement_security.c.security_id)
+                    .join(
+                        announcement_event_types,
+                        announcement_event_types.c.announcement_id
+                        == announcement_security.c.announcement_id,
+                    )
+                    .where(
+                        announcement_event_types.c.taxonomy_version == tax.version,
+                        announcement_event_types.c.event_type == event_type,
+                    )
+                    .distinct()
+                ).scalars()
+                today = ist_today()
+                symbols = sorted(
+                    {
+                        s
+                        for sid in securities
+                        if (s := resolver.identifier(sid, "nse_symbol", today))
+                    }
+                )
+                stored = set(conn.execute(select(financial_results.c.symbol).distinct()).scalars())
+            todo = [s for s in symbols if refresh or s not in stored][:limit]
+            typer.echo(
+                f"{len(symbols)} companies with {event_type} filings; asking about {len(todo)}"
+            )
+            for symbol in todo:
+                outcome = await ingest_results_index(svc, symbol, job="backfill_results")
+                _print_outcome(symbol, outcome)
+            stats = await fetch_pending_xbrl(
+                svc, since=_parse_day(since), limit=limit, job="backfill_results"
+            )
+            typer.echo(f"XBRL: {stats.attempted} read, {stats.done} done, {stats.failed} failed")
+
+    asyncio.run(main())
+
+
 @backfill_app.command("indices")
 def backfill_indices(
     start: Annotated[str, typer.Option(help="First day, YYYY-MM-DD.")],
@@ -1853,7 +1915,8 @@ def backtest_run(
             liquidity=lookups.liquidity,
             flags=lookups.flags,
         )
-        facts = clock.extracted_facts([w.announcement_id for w in windows], "cascade:")
+        extracted = clock.extracted_facts([w.announcement_id for w in windows], "cascade:")
+        facts = feed.with_revenue_ratio(clock, windows, extracted)
         bars = feed.bar_events(settings.bars_dir, windows)
         sessions = clock.calendar().trading_days(first, last, include_special=False)
         typer.echo(

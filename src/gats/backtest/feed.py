@@ -85,3 +85,21 @@ class Lookups:
     def flags(self, key: str, day: date) -> frozenset[str] | None:
         symbol = self._symbol(key, day)
         return None if symbol is None else self._clock.restrictions_on(symbol, day)
+
+
+def with_revenue_ratio(
+    clock: AsOf, windows: Sequence[EventWindow], facts: Mapping[int, Mapping[str, Any]]
+) -> dict[int, dict[str, Any]]:
+    """Add ``amount_vs_revenue`` (the event's rupee amount over the company's
+    trailing revenue as known when the filing appeared) where both exist."""
+    out: dict[int, dict[str, Any]] = {}
+    for window in windows:
+        known = dict(facts.get(window.announcement_id, {}))
+        amount = known.get("amount_inr")
+        revenue = clock.trailing_revenue(window.security_id, window.available_at)
+        if amount is not None and revenue is not None and revenue.rupees > 0:
+            known["amount_vs_revenue"] = float(amount) / revenue.rupees
+            known["trailing_revenue_rs"] = revenue.rupees
+        if known:
+            out[window.announcement_id] = known
+    return out

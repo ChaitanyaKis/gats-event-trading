@@ -4,8 +4,8 @@ Claude Code updates this after every task. Newest log entry first.
 
 ## Status
 
-- **Version:** 0.2.0 · **Schema:** v8 · **Milestone:** M3 (M1 waits only on T1.6, HUMAN)
-- **Next up:** T4.7 revenue ingestion and the point-in-time `amount_vs_revenue` feature (source verified), then its pre-registration; M7 paper runtime; learning notes. T5.3 waits for live latency (recorder, item 1). Waiting on the human: recorder (1), M3 run (3), labels (5), Upstox token (6)
+- **Version:** 0.2.0 · **Schema:** v9 · **Milestone:** M3 (M1 waits only on T1.6, HUMAN)
+- **Next up:** T4.7 pre-registration of the magnitude re-test, then the M7 paper runtime and learning notes. T5.3 waits for live latency (recorder, item 1). Waiting on the human: recorder (1), M3 run (3), labels (5), Upstox token (6)
 
 ## Waiting on the human (HUMAN)
 
@@ -85,6 +85,17 @@ are PowerShell, run from `C:\Projects\GATS`.
    its older bars, and then gives you one resumable command for the full
    event-window fetch (`gats bars events`, about 1–2 h at Upstox's rate limit).
 
+7. **T4.7 Quarterly results (company revenue).** Run after item 3 and
+   `gats refdata build` (it asks about the companies that have order-win
+   filings: 281 today, more after the full backfill). About 1 second per
+   file, so roughly 2 h now and several hours after the backfill; resumable,
+   and fine while the recorder runs (NSE only):
+   ```powershell
+   cd C:\Projects\GATS
+   .venv\Scripts\gats backfill results --type ORDER_WIN --since 2021-01-01 --limit 20000
+   ```
+   Rerun the same command until it prints `XBRL: 0 read`.
+
 ## Blocked
 
 (none)
@@ -95,7 +106,7 @@ are PowerShell, run from `C:\Projects\GATS`.
 - [ ] M1 finishing: T1.1 ✅ · T1.2 ✅ · T1.3 ✅ · T1.4 ✅ · T1.5 ✅ · T1.6
 - [x] M2 Reference data & entity resolution (0.2.0): T2.1 ✅ · T2.2 ✅ · T2.3 ✅ · T2.4 ✅ · T2.5 ✅ · T2.6 ✅ · T2.7 ✅ · T2.8 ✅ · T2.9 ✅
 - [ ] M3 Event study (G1 kill test): T3.0 ⏳ (human) · T3.1 ⚠️ · T3.2 ✅ · T3.3 ✅ · T3.4 ✅ (code; real run ⏳ backfill) · T3.5 ⏳ (gate, after the real run)
-- [ ] M4 LLM extraction (infrastructure for ORDER_WIN; scope confirmed at G1): T4.1 ✅ · T4.2 ✅ · T4.3 ✅ · T4.4 ✅ · T4.5 ⏳ (code ✅; labels: human) · T4.6 ⏳ (code ✅; needs the labels) · T4.7
+- [ ] M4 LLM extraction (infrastructure for ORDER_WIN; scope confirmed at G1): T4.1 ✅ · T4.2 ✅ · T4.3 ✅ · T4.4 ✅ · T4.5 ⏳ (code ✅; labels: human) · T4.6 ⏳ (code ✅; needs the labels) · T4.7 ⏳ (revenue feature ✅; results backfill: human, item 7; re-test needs G1)
 - [ ] M5 Intraday data & reaction curves (G1b): T5.1 ⏳ (code ✅; token: human, item 6) · T5.2 ⏳ (code ✅; the fetch needs the token) · T5.3 ⏳ (pre-registered; code ✅; the run needs bars and recorder latency) · T5.4 ⏳ (gate)
 - [ ] M6 Backtester (G2): T6.1 ⏳ (model ✅; broker-calculator check needs the token, item 6) · T6.2 ✅ · T6.3 ✅ · T6.4 ✅ · T6.5 ✅ · T6.6 ✅ · T6.7 ✅ · T6.8 ⏳ (code ✅; the G2 run needs bars, events and T4.7's revenue feature)
 - [ ] M7 Paper trading (G3)
@@ -112,6 +123,14 @@ are PowerShell, run from `C:\Projects\GATS`.
 ## Log
 
 - **2026-10-03:**
+  - T4.7 revenue feature done (the backfill is the human's, item 7). `financial_results`
+    (schema v9): one row per results filing with its dissemination time; `gats backfill
+    results` stores both indexes and reads each quarter's revenue from XBRL only when the
+    file matches its filing (quarter end, standalone/consolidated), consolidated first.
+    `AsOf.trailing_revenue`: four latest consecutive quarters public by the moment asked,
+    revisions counted from when they were public, no answer for gaps or stale figures.
+    Events get `amount_vs_revenue` in the backtest feed. Real check: 281 companies with
+    order wins; 3i Infotech June 2026 quarter Rs 177.94 cr consolidated.
   - T4.7 revenue source VERIFIED (ingestion next). NSE's results come in two regimes: the
     legacy index (2005 → Oct-Dec 2024, where it stops) and the integrated-filing index (from
     the March 2025 quarter). Both give dissemination times (so trailing revenue can be

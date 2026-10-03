@@ -9,7 +9,9 @@ that can return a row the system could not have known at ``as_of``.
 from __future__ import annotations
 
 from collections.abc import Collection
+from dataclasses import dataclass
 from datetime import date, datetime, time
+from itertools import pairwise
 from typing import Any
 
 from sqlalchemy import Connection, Row, and_, func, select
@@ -21,6 +23,7 @@ from gats.db.schema import (
     announcements,
     eod_prices,
     extractions,
+    financial_results,
     index_eod,
     price_bands,
     surveillance_versions,
@@ -30,6 +33,14 @@ from gats.refdata.calendar import TradingCalendar
 from gats.refdata.master import Resolver
 from gats.sources.nse_surveillance import TRADE_FOR_TRADE_SERIES
 from gats.timeutil import ensure_aware, to_ist
+
+
+@dataclass(frozen=True)
+class TrailingRevenue:
+    rupees: float  # four consecutive quarters
+    quarters: tuple[date, ...]  # their period ends, newest first
+    consolidated: bool
+    known_at: datetime  # when the newest filing used became public
 
 
 class AsOf:
@@ -273,6 +284,52 @@ class AsOf:
             if announcement_id in wanted and fields:
                 facts[announcement_id] = dict(fields)
         return facts
+
+    def trailing_revenue(
+        self, security_id: int, at: datetime, *, max_age_days: int = 280
+    ) -> TrailingRevenue | None:
+        """Revenue of the four latest consecutive quarters whose results were
+        public at or before ``at`` (and the clock).
+
+        Consolidated figures are preferred, standalone used when there is no
+        complete consolidated run. A revised filing replaces the original
+        only once the revision itself is public. No answer (None) when four
+        consecutive quarters are not available or the newest is older than
+        ``max_age_days``: a stale or patched-together figure would be a
+        guess about the company's size.
+        """
+        moment = min(ensure_aware(at), self._as_of)
+        symbols = {value for value, _, _ in self.resolver().windows_of(security_id, "nse_symbol")}
+        if not symbols:
+            return None
+        f = financial_results
+        rows = self._conn.execute(
+            select(f.c.period_end, f.c.consolidated, f.c.revenue, f.c.available_at)
+            .where(
+                f.c.symbol.in_(sorted(symbols)),
+                f.c.available_at <= moment,
+                f.c.revenue.is_not(None),
+            )
+            .order_by(f.c.available_at)
+        ).all()
+        for consolidated in (True, False):
+            latest: dict[date, tuple[float, datetime]] = {}
+            for row in rows:  # in order of availability: a later filing of a quarter wins
+                if row.consolidated == consolidated:
+                    latest[row.period_end] = (float(row.revenue), row.available_at)
+            ends = sorted(latest, reverse=True)[:4]
+            if len(ends) < 4 or (to_ist(moment).date() - ends[0]).days > max_age_days:
+                continue
+            months = [end.year * 12 + end.month for end in ends]
+            if any(a - b != 3 for a, b in pairwise(months)):
+                continue
+            return TrailingRevenue(
+                rupees=sum(latest[end][0] for end in ends),
+                quarters=tuple(ends),
+                consolidated=consolidated,
+                known_at=max(latest[end][1] for end in ends),
+            )
+        return None
 
     def resolver(self) -> Resolver:
         """The security master's identifier lookup (built once per clock)."""

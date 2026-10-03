@@ -1,7 +1,7 @@
 # Changelog
 
 ## Unreleased
-Schema v8 (new tables only), upgraded automatically.
+Schema v9 (new tables only), upgraded automatically.
 
 - **One-minute bars (groundwork):** `gats probe upstox-instruments` reads
   Upstox's public instrument file; with the read-only Analytics Token in
@@ -10,6 +10,11 @@ Schema v8 (new tables only), upgraded automatically.
   `gats bars show` summarises a day, and `gats probe upstox-candles`
   checks a day's bars against NSE's end-of-day file. New optional
   dependency (extra `research`): duckdb.
+- **Company revenue:** `gats backfill results --type ORDER_WIN` stores NSE's
+  quarterly results filings (both the legacy and the integrated-filing
+  index) and reads each quarter's revenue from its XBRL. Trailing revenue is
+  available point in time (`AsOf.trailing_revenue`), and events in a
+  backtest carry `amount_vs_revenue`.
 - **Intraday reaction study:** `gats research reaction --scope TYPE` runs the
   pre-registered M5 study (entry after measured feed latency, verified
   costs) and writes `reports/M5_reaction_curves.md` with the G1b decision.
