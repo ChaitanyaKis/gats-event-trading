@@ -1044,3 +1044,95 @@ def research_report(
     logged = [r for r in previous_runs(settings.data_dir, cfg.study, digest) if r["run_id"] == run]
     fingerprint = {k: v for k, v in (logged[0] if logged else {}).items() if k.startswith("eod")}
     _write_m3_report(rows, cfg, digest, run, fingerprint, log_trial=False)
+
+
+# --- extract -----------------------------------------------------------------------------
+
+extract_app = typer.Typer(no_args_is_help=True, help="Attachment text (M4).")
+app.add_typer(extract_app, name="extract")
+
+
+def _typed_ids(conn: Any, event_type: str, version: str, since: date | None) -> list[int]:
+    from gats.db.schema import announcement_event_types
+
+    query = (
+        select(announcements.c.id)
+        .join(
+            announcement_event_types,
+            announcement_event_types.c.announcement_id == announcements.c.id,
+        )
+        .where(
+            announcement_event_types.c.taxonomy_version == version,
+            announcement_event_types.c.event_type == event_type,
+        )
+        .order_by(announcements.c.event_ts.desc())
+    )
+    if since is not None:
+        query = query.where(announcements.c.event_ts >= ist_datetime(since, time()))
+    return [int(i) for i in conn.execute(query).scalars()]
+
+
+@extract_app.command("fetch")
+def extract_fetch(
+    event_type: Annotated[str, typer.Option("--type", help="Event type, e.g. ORDER_WIN.")],
+    limit: Annotated[int, typer.Option(help="Most downloads in this run (newest first).")] = 300,
+    since: Annotated[str | None, typer.Option(help="Only filings from YYYY-MM-DD.")] = None,
+) -> None:
+    """Download the attachments of one event type, bypassing the storage policy."""
+    settings = _settings()
+    tax = _taxonomy(settings)
+
+    async def main() -> Outcome:
+        async with _services(settings) as svc:
+            with svc.engine.begin() as conn:
+                ids = _typed_ids(
+                    conn, event_type, tax.version, _parse_day(since) if since else None
+                )
+            return await ingest.fetch_attachments_for(svc, ids, job="extract_fetch", limit=limit)
+
+    outcome = asyncio.run(main())
+    typer.echo(
+        f"{event_type}: {outcome.n_records} attempted, {outcome.n_new} downloaded {outcome.meta}"
+    )
+
+
+@extract_app.command("texts")
+def extract_texts(
+    limit: Annotated[int, typer.Option(help="Most documents in this run.")] = 10**7,
+) -> None:
+    """Extract text from every downloaded attachment not yet extracted."""
+    from gats.extract.texts import extract_pending
+
+    settings = _settings()
+    engine = make_engine(settings.resolved_db_url)
+    init_db(engine)
+    with engine.begin() as conn:
+        stats = extract_pending(conn, RawStore(settings.raw_dir), utcnow(), limit=limit)
+    engine.dispose()
+    typer.echo(
+        f"{stats.documents} documents: {stats.with_text} with text, "
+        f"{stats.needs_ocr} need OCR, {stats.errors} errors"
+    )
+    for sample in stats.error_samples:
+        typer.echo(f"  error: {sample}")
+
+
+@extract_app.command("coverage")
+def extract_coverage(
+    event_type: Annotated[str, typer.Option("--type", help="Event type, e.g. ORDER_WIN.")],
+) -> None:
+    """Share of an event type's downloaded attachments that yield text (target >= 90%)."""
+    from gats.extract.texts import text_coverage
+
+    settings = _settings(log_to_file=False)
+    tax = _taxonomy(settings)
+    engine = make_engine(settings.resolved_db_url)
+    init_db(engine)
+    with engine.begin() as conn:
+        cov = text_coverage(conn, event_type, tax.version)
+    engine.dispose()
+    typer.echo(
+        f"{event_type}: {cov.filings} filings with attachments, {cov.downloaded} downloaded; "
+        f"text {cov.with_text} ({cov.share:.1%}), needs OCR {cov.needs_ocr}, errors {cov.errors}"
+    )
+    typer.echo(f"  attachment status: {cov.by_status}")

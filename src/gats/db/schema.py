@@ -449,3 +449,19 @@ announcement_event_types = Table(
     Column("classified_at", UTCDateTime, nullable=False),
     Index(None, "taxonomy_version", "event_type"),
 )
+
+# Text extracted from attachments (T4.1), per extractor version: a better
+# extractor adds rows next to the old ones.
+document_texts = Table(
+    "document_texts",
+    metadata,
+    Column("doc_id", String(64), ForeignKey("raw_documents.doc_id"), primary_key=True),
+    Column("extractor", String(32), primary_key=True),
+    Column("extractor_version", String(16), primary_key=True),
+    Column("pages", Integer, nullable=False),
+    Column("chars", Integer, nullable=False),
+    Column("needs_ocr", Boolean, nullable=False),
+    Column("error", Text),
+    Column("text", Text, nullable=False),
+    Column("extracted_at", UTCDateTime, nullable=False),
+)

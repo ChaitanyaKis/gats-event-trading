@@ -22,6 +22,7 @@ from typing import Any, Protocol
 from gats import ingest
 from gats.db import repo
 from gats.db.repo import IngestMode
+from gats.extract.texts import extract_pending
 from gats.ingest import Outcome, Services
 from gats.logging_setup import kv
 from gats.refdata import dedupe, master, versions
@@ -324,6 +325,22 @@ class ClassifyJob:
 
 
 @dataclass
+class ExtractJob:
+    """Extract text from newly downloaded attachments."""
+
+    name: str
+    poll_s: float
+
+    def interval_s(self, now: datetime) -> float:
+        return self.poll_s
+
+    async def run_once(self, svc: Services) -> Outcome:
+        with svc.engine.begin() as conn:
+            stats = extract_pending(conn, svc.store, svc.clock(), limit=500)
+        return Outcome(ok=True, n_records=stats.documents, n_new=stats.with_text)
+
+
+@dataclass
 class AttachmentsJob:
     name: str
     poll_s: float
@@ -485,6 +502,7 @@ def build_jobs(svc: Services) -> list[Job]:
         jobs.append(ClassifyJob("classify", s.classify_poll_s, s.taxonomy_path))
     if s.attachments_enabled:
         jobs.append(AttachmentsJob("attachments", s.attachments_poll_s))
+        jobs.append(ExtractJob("extract", s.extract_poll_s))
     sources = tuple(
         src for src, enabled in (("BSE", s.bse_enabled), ("NSE", s.nse_enabled)) if enabled
     )

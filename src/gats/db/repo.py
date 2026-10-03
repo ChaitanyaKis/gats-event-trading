@@ -340,6 +340,31 @@ def pending_attachments(conn: Connection, limit: int, max_attempts: int) -> list
     )
 
 
+def attachments_for(
+    conn: Connection, announcement_ids: Sequence[int], max_attempts: int
+) -> list[Row[Any]]:
+    """Not-yet-downloaded attachments of the given filings (policy skips included)."""
+    rows: list[Any] = []
+    for chunk in _chunks([str(i) for i in announcement_ids]):
+        rows += conn.execute(
+            select(
+                announcements.c.id,
+                announcements.c.source,
+                announcements.c.attachment_url,
+                announcements.c.attachment_attempts,
+                announcements.c.category,
+                announcements.c.subcategory,
+                announcements.c.subject,
+            ).where(
+                announcements.c.id.in_([int(i) for i in chunk]),
+                announcements.c.attachment_url.is_not(None),
+                announcements.c.attachment_status.in_(("pending", "failed", "skipped")),
+                announcements.c.attachment_attempts < max_attempts,
+            )
+        ).all()
+    return sorted(rows, key=lambda r: r.id)
+
+
 def mark_attachment(
     conn: Connection,
     ann_id: int,

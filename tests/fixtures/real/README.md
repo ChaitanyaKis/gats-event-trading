@@ -22,3 +22,4 @@ exchange data only; nothing personal.
 | `nse_corp_actions_sample.json` | `www.nseindia.com/api/corporates-corporateActions?index=equities&...` (2019-09 → 2026-09) | 2026-10-03 | the 10 cases' Sep 2025 rows, plus real examples of a hyphenated bonus, a bonus of preference shares, a consolidation, rights, a demerger, and an LTI dividend reported under today's symbol LTM |
 | `nse_asm_2026-10-03.json` | `www.nseindia.com/api/reportASM` | 2026-10-03 | 9 of 126 long-term entries (all stages) and 5 of 68 short-term |
 | `nse_gsm_2026-10-03.json` | `www.nseindia.com/api/reportGSM` | 2026-10-03 | 8 of 77 entries, incl. stages `0` and `LXII` |
+| `order_win_attachment.pdf` | Goldiam International order-win attachment (the same file on NSE and BSE), via `gats extract fetch` | 2026-10-03 | unchanged, 180 KB, 2 pages |

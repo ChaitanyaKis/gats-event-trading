@@ -786,6 +786,69 @@ def attachment_wanted(
     return not include or any(word.lower() in haystack for word in include)
 
 
+async def download_attachment(svc: Services, row: Any, *, job: str, max_bytes: int) -> str:
+    """Download one announcement's attachment; returns the new status.
+
+    BSE moves files from its live folder to a historical one, so both are
+    tried; a 404 on every candidate is ``missing``, transport errors are
+    ``failed`` (retried later), oversize files are ``too_large``.
+    """
+    settings = svc.settings
+    if row.source == bse.SOURCE:
+        candidates = bse.attachment_candidates(
+            row.attachment_url,
+            settings.bse_attachment_live_base,
+            settings.bse_attachment_hist_base,
+        )
+        warmup = None
+    else:
+        candidates, warmup = [row.attachment_url], settings.nse_home_url
+
+    status, doc_id, error = "missing", None, None
+    for url in candidates:
+        got = await safe_get(svc, url, warmup_url=warmup, max_bytes=max_bytes)
+        if isinstance(got, Outcome):
+            status, error = "failed", got.error
+            continue
+        if got.status == 404:
+            continue
+        if got.too_large:
+            status = "too_large"
+            break
+        if not got.ok:
+            status, error = "failed", f"HTTP {got.status}"
+            continue
+        with svc.engine.begin() as conn:
+            doc_id = repo.save_raw(
+                conn,
+                svc.store,
+                got.content,
+                kind="attachment",
+                source=row.source,
+                url=url,
+                content_type=got.content_type,
+                fetched_at=got.fetched_at,
+                meta={"ann_id": row.id},
+            )
+        status = "done"
+        break
+
+    with svc.engine.begin() as conn:
+        repo.mark_attachment(conn, row.id, status=status, doc_id=doc_id)
+        repo.log_fetch(
+            conn,
+            job=job,
+            url=row.attachment_url,
+            started_at=svc.clock(),
+            ok=status != "failed",
+            error=error,
+            doc_id=doc_id,
+            n_records=1,
+            n_new=1 if status == "done" else 0,
+        )
+    return status
+
+
 async def fetch_pending_attachments(svc: Services, *, job: str) -> Outcome:
     """Download queued attachments that pass the storage policy.
 
@@ -813,63 +876,30 @@ async def fetch_pending_attachments(svc: Services, *, job: str) -> Outcome:
         if downloads >= settings.attachments_batch:
             continue
         downloads += 1
-
-        if row.source == bse.SOURCE:
-            candidates = bse.attachment_candidates(
-                row.attachment_url,
-                settings.bse_attachment_live_base,
-                settings.bse_attachment_hist_base,
-            )
-            warmup = None
-        else:
-            candidates, warmup = [row.attachment_url], settings.nse_home_url
-
-        status, doc_id, error = "missing", None, None
-        for url in candidates:
-            got = await safe_get(svc, url, warmup_url=warmup, max_bytes=max_bytes)
-            if isinstance(got, Outcome):
-                status, error = "failed", got.error
-                continue
-            if got.status == 404:
-                continue
-            if got.too_large:
-                status = "too_large"
-                break
-            if not got.ok:
-                status, error = "failed", f"HTTP {got.status}"
-                continue
-            with svc.engine.begin() as conn:
-                doc_id = repo.save_raw(
-                    conn,
-                    svc.store,
-                    got.content,
-                    kind="attachment",
-                    source=row.source,
-                    url=url,
-                    content_type=got.content_type,
-                    fetched_at=got.fetched_at,
-                    meta={"ann_id": row.id},
-                )
-            status = "done"
-            break
-
-        with svc.engine.begin() as conn:
-            repo.mark_attachment(conn, row.id, status=status, doc_id=doc_id)
-            repo.log_fetch(
-                conn,
-                job=job,
-                url=row.attachment_url,
-                started_at=svc.clock(),
-                ok=status != "failed",
-                error=error,
-                doc_id=doc_id,
-                n_records=1,
-                n_new=1 if status == "done" else 0,
-            )
+        status = await download_attachment(svc, row, job=job, max_bytes=max_bytes)
         total.n_records += 1
         total.n_new += 1 if status == "done" else 0
         if status == "failed":
-            total.warnings.append(f"attachment {row.id}: {error}")
+            total.warnings.append(f"attachment {row.id}: failed")
+    return total
+
+
+async def fetch_attachments_for(
+    svc: Services, announcement_ids: Sequence[int], *, job: str, limit: int
+) -> Outcome:
+    """Download the attachments of chosen filings, regardless of the storage
+    policy (they were chosen because a study needs them). The size cap and
+    retry limits still apply."""
+    settings = svc.settings
+    max_bytes = int(settings.attachments_max_mb * 1024 * 1024)
+    with svc.engine.begin() as conn:
+        rows = repo.attachments_for(conn, announcement_ids, settings.attachments_max_attempts)
+    total = Outcome(ok=True)
+    for row in rows[:limit]:
+        status = await download_attachment(svc, row, job=job, max_bytes=max_bytes)
+        total.n_records += 1
+        total.n_new += 1 if status == "done" else 0
+        total.meta[status] = total.meta.get(status, 0) + 1
     return total
 
 

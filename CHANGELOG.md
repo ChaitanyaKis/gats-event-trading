@@ -1,7 +1,11 @@
 # Changelog
 
 ## Unreleased
-- **M3 report:** `gats research event-study` also writes
+- **Attachment text:** downloaded attachments are converted to text
+  (`document_texts`, recorder job `extract`; scanned PDFs flagged
+  `needs_ocr`). `gats extract fetch --type ORDER_WIN` downloads an event
+  type's attachments regardless of the storage policy; `gats extract texts`
+  and `gats extract coverage` report results. New dependency: pypdf.- **M3 report:** `gats research event-study` also writes
   `reports/M3_event_study.md` (G1 verdict from the pre-registered rule,
   train vs test for every type, liquidity buckets, CAR plot, filter
   accounting, spot-check list) and logs the trial; `gats research report
