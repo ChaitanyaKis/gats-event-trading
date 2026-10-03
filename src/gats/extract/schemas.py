@@ -39,7 +39,8 @@ class OrderWin(BaseModel):
         default=None, max_length=200, description="Who placed the order."
     )
     domestic_or_export: Literal["domestic", "export", "unknown"] = "unknown"
-    duration_months: float | None = Field(default=None, gt=0, le=240)
+    # Up to 50 years: power-purchase and O&M contracts run 25 years (seen in real filings).
+    duration_months: float | None = Field(default=None, gt=0, le=600)
     is_repeat_order: bool | None = None
     confidence: float = Field(default=0.5, ge=0, le=1)
     evidence_span: str | None = Field(

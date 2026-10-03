@@ -5,7 +5,7 @@ Claude Code updates this after every task. Newest log entry first.
 ## Status
 
 - **Version:** 0.2.0 · **Schema:** v5 · **Milestone:** M3 (M1 waits only on T1.6, HUMAN)
-- **Next up:** M4 T4.3 Rules baseline (M3's real run waits on the T3.0 backfill: item 3)
+- **Next up:** M4 T4.4 Local LLM extractor (HUMAN: Ollama) (M3's real run waits on the T3.0 backfill: item 3)
 
 ## Waiting on the human (HUMAN)
 
@@ -68,7 +68,7 @@ are PowerShell, run from `C:\Projects\GATS`.
 - [ ] M1 finishing: T1.1 ✅ · T1.2 ✅ · T1.3 ✅ · T1.4 ✅ · T1.5 ✅ · T1.6
 - [x] M2 Reference data & entity resolution (0.2.0): T2.1 ✅ · T2.2 ✅ · T2.3 ✅ · T2.4 ✅ · T2.5 ✅ · T2.6 ✅ · T2.7 ✅ · T2.8 ✅ · T2.9 ✅
 - [ ] M3 Event study (G1 kill test): T3.0 ⏳ (human) · T3.1 ⚠️ · T3.2 ✅ · T3.3 ✅ · T3.4 ✅ (code; real run ⏳ backfill) · T3.5 ⏳ (gate, after the real run)
-- [ ] M4 LLM extraction (infrastructure for ORDER_WIN; scope confirmed at G1): T4.1 ✅ · T4.2 ✅ · T4.3 · T4.4 · T4.5 · T4.6 · T4.7
+- [ ] M4 LLM extraction (infrastructure for ORDER_WIN; scope confirmed at G1): T4.1 ✅ · T4.2 ✅ · T4.3 ✅ · T4.4 · T4.5 · T4.6 · T4.7
 - [ ] M5 Intraday data & reaction curves (G1b)
 - [ ] M6 Backtester (G2)
 - [ ] M7 Paper trading (G3)
@@ -85,6 +85,13 @@ are PowerShell, run from `C:\Projects\GATS`.
 ## Log
 
 - **2026-10-03:**
+  - T4.3 done. `gats.extract.rules.extract_order_win`: SEBI annexure fields
+    (label-to-label segments, PDF cell interleaving handled) or the order
+    sentence of a covering letter; confidence 0.9 / 0.7 / 0.2 with `unsure`
+    for the cascade. On all 362 real order texts: amount 82% (annexure 235,
+    sentence 63, none 64), counterparty 67%, domestic/export 70%, duration
+    40%. Accuracy is measured against human labels in T4.6. Found while
+    measuring: a 25-year contract, so the duration cap is now 50 years.
   - T4.2 done. `gats.extract.money` (Indian and Western digit grouping;
     crore/lakh/million/billion; ₹/Rs/INR/Rupees/USD/US$/€/£/AED; crore and
     lakh imply rupees; foreign amounts are never FX-converted) and
