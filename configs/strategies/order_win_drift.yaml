@@ -1,0 +1,15 @@
+# S1 intraday: buy after an order win that is large for the company.
+#
+# These values are placeholders until the G1b pre-registration fixes them
+# (docs/research/, before any backtest). Changing any value changes the
+# strategy version (a hash of the parameters) and counts as a new trial.
+strategy: order_win_drift
+version: v1
+params:
+  min_amount_vs_revenue: 0.10
+  trade_unknown_size: false
+  product: intraday
+  entry_cutoff_ist: "15:00"
+  max_signal_delay_minutes: 30
+  hold_minutes: 60
+  square_off_ist: "15:15"

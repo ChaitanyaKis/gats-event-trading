@@ -10,6 +10,10 @@ Schema v7 (new tables only), upgraded automatically.
   `gats bars show` summarises a day, and `gats probe upstox-candles`
   checks a day's bars against NSE's end-of-day file. New optional
   dependency (extra `research`): duckdb.
+- **Strategy interface:** strategies (`gats.strategy`) map events and bars
+  to signals with no I/O or hidden state, so the same object runs in
+  backtest, paper and live; parameters come from `configs/strategies/` and
+  are versioned by hash. First strategy: S1 order-win drift (intraday).
 - **Trading costs:** `configs/costs/india_equity.yaml` holds every Indian
   cash-equity charge (brokerage, STT, NSE transaction and IPFT, SEBI fee,
   stamp duty, DP, GST) with its official source and effective dates;
