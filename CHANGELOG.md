@@ -1,7 +1,7 @@
 # Changelog
 
 ## Unreleased
-Schema v9 (new tables only), upgraded automatically.
+Schema v10 (new tables only), upgraded automatically.
 
 - **One-minute bars (groundwork):** `gats probe upstox-instruments` reads
   Upstox's public instrument file; with the read-only Analytics Token in

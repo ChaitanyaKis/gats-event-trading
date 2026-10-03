@@ -67,6 +67,10 @@ def _v8_to_v9(conn: Connection) -> None:
     """v9 only added `financial_results`, which create_all() has made."""
 
 
+def _v9_to_v10(conn: Connection) -> None:
+    """v10 only added the paper-trading tables, which create_all() has made."""
+
+
 # Upgrade steps keyed by the version they start from. Each must be additive
 # and safe to run on a database that create_all() has just touched.
 _UPGRADES: dict[int, Callable[[Connection], None]] = {
@@ -78,6 +82,7 @@ _UPGRADES: dict[int, Callable[[Connection], None]] = {
     6: _v6_to_v7,
     7: _v7_to_v8,
     8: _v8_to_v9,
+    9: _v9_to_v10,
 }
 
 

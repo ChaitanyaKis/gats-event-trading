@@ -335,3 +335,70 @@ def test_stepping_live_equals_replaying_and_listeners_hear_everything() -> None:
     assert summary(stepped) == summary(replayed)
     assert heard.orders == [o.order_id for o in stepped.orders]
     assert heard.fills == [(e.order_id, e.quantity) for e in stepped.executions]
+
+
+def live_engine(strategy: Strategy) -> Engine:  # type: ignore[type-arg]
+    return Engine(
+        strategy, COSTS, EngineConfig(initial_cash=1_000_000.0, notional_per_trade=100_000.0)
+    )
+
+
+def test_a_late_item_decides_late_so_it_cannot_fill_in_the_past() -> None:
+    """Live, candles can arrive minutes late. The decision they trigger is
+    made on arrival, so the bars that went by in between cannot fill it."""
+    day = bars(A, at(10, 0), flat(100, 9))
+    plan = {(A, at(10, 0)): [buy(quantity=10)]}
+    on_time = run(Scripted(plan), day)
+    assert [e.at for e in buys(on_time)] == [at(10, 2)]  # decided 10:01:00, sent 10:01:05
+
+    engine = live_engine(Scripted(plan))
+    arrival = at(10, 5, ss=30)  # the feed was down: five candles arrive together
+    for bar in day[:5]:
+        engine.step(bar, at=arrival)
+    for bar in day[5:]:
+        engine.step(bar, at=bar.closed_at + timedelta(seconds=3))
+    late = engine.finish()
+    (order,) = late.orders
+    assert order.submitted_at == arrival and order.eligible_at == arrival + timedelta(seconds=5)
+    assert [e.at for e in buys(late)] == [at(10, 6)]  # the first bar that began after it was sent
+
+
+def test_handing_an_item_over_before_it_is_known_is_refused() -> None:
+    (bar,) = bars(A, at(10, 0), flat(100, 1))
+    engine = live_engine(Scripted())
+    with pytest.raises(ValueError, match="look-ahead"):
+        engine.step(bar, at=bar.start + timedelta(seconds=30))  # the bar is still forming
+    event = MarketEvent(1, 1, A, "ORDER_WIN", at(10, 0))
+    with pytest.raises(ValueError, match="look-ahead"):
+        engine.step(event, at=at(9, 59, ss=59))
+    assert engine.result().orders == []
+
+
+def test_days_must_come_in_order() -> None:
+    engine = live_engine(Scripted())
+    engine.step(bars(A, at(10, 0, D2), flat(100, 1))[0])
+    with pytest.raises(ValueError, match="time order"):
+        engine.step(bars(A, at(10, 0, D1), flat(100, 1))[0])
+
+
+def test_a_reference_price_stands_in_for_the_previous_session() -> None:
+    """Before the open a live runtime has no bar of the stock: the previous
+    close sizes the order, as the day before does in a backtest."""
+    event = MarketEvent(1, 1, A, "ORDER_WIN", at(8, 30, D2))
+    plan = {1: [buy(when=at(8, 30, D2))]}
+    blind = live_engine(Scripted(on_events=plan))
+    blind.step(event)
+    assert blind.result().orders[0].note == "no reference price yet"
+
+    engine = live_engine(Scripted(on_events=plan))
+    engine.reference(A, 100.0, at(15, 30, D1))
+    engine.reference(A, 50.0, at(15, 29, D1))  # older than what is known: ignored
+    engine.step(event)
+    for bar in bars(A, at(9, 15, D2), flat(101, 3)):
+        engine.step(bar)
+    result = engine.finish()
+    (order,) = result.orders
+    assert (order.quantity, order.limit) == (1000, 102.0)  # Rs 100,000 at the reference, +2%
+    assert buys(result)[0].at == at(9, 15, D2)
+    with pytest.raises(ValueError, match="positive"):
+        engine.reference(B, 0.0, at(15, 30, D1))

@@ -29,6 +29,7 @@ from gats.timeutil import to_ist
 
 Liquidity = Callable[[str, date], float | None]  # median daily turnover, rupees
 Flags = Callable[[str, date], frozenset[str] | None]  # e.g. {"ASM"}; None = unknown
+Halted = Callable[[], bool]  # is the kill switch on?
 
 
 class RiskLimits(BaseModel):
@@ -84,16 +85,24 @@ class RiskEngine:
         *,
         liquidity: Liquidity | None = None,
         flags: Flags | None = None,
+        halted: Halted | None = None,
         root: Path = Path(),
     ) -> None:
         self.limits = limits
         self.version = version
         self.liquidity = liquidity
         self.flags = flags
+        self.halted = halted or self.kill_switch_on
         self.root = root
 
+    def kill_switch_on(self) -> bool:
+        """The kill switch is a file, so that stopping new entries needs no
+        working software: creating it by hand is enough."""
+        switch = self.limits.kill_switch_file
+        return switch is not None and (self.root / switch).exists()
+
     @classmethod
-    def load(cls, path: Path, **lookups: Liquidity | Flags | None) -> RiskEngine:
+    def load(cls, path: Path, **lookups: Liquidity | Flags | Halted | None) -> RiskEngine:
         raw = path.read_bytes()
         limits = RiskLimits.model_validate(yaml.safe_load(raw))
         digest = hashlib.sha256(raw.replace(b"\r\n", b"\n")).hexdigest()[:8]
@@ -111,7 +120,7 @@ class RiskEngine:
     def _entry(self, order: OrderIntent, account: Exposure) -> str | None:
         lim = self.limits
         key, day = order.instrument_key, to_ist(order.at).date()
-        if lim.kill_switch_file is not None and (self.root / lim.kill_switch_file).exists():
+        if self.halted():
             return f"kill switch: {lim.kill_switch_file} exists"
         loss = account.day_start_equity - account.equity
         if loss >= lim.max_daily_loss_pct_equity * account.day_start_equity:

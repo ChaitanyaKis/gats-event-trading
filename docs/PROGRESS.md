@@ -4,8 +4,8 @@ Claude Code updates this after every task. Newest log entry first.
 
 ## Status
 
-- **Version:** 0.2.0 · **Schema:** v9 · **Milestone:** M3 (M1 waits only on T1.6, HUMAN)
-- **Next up:** M7 T7.1 paper runtime (live quotes need the Upstox token, item 6), then learning notes for the code-complete milestones. T5.3 waits for live latency (recorder, item 1). Waiting on the human: recorder (1), M3 run (3), labels (5), Upstox token (6)
+- **Version:** 0.2.0 · **Schema:** v10 · **Milestone:** M3 (M1 waits only on T1.6, HUMAN)
+- **Next up:** M7 T7.1 paper runtime, in progress: engine stepping and the journal are done; next the recorder's fast hand-off, live bars (Upstox intraday candles), the runtime loop with a full-session test, the mock exchange. Then learning notes for the code-complete milestones. T5.3 waits for live latency (recorder, item 1). Waiting on the human: recorder (1), M3 run (3), labels (5), Upstox token (6)
 
 ## Waiting on the human (HUMAN)
 
@@ -109,7 +109,7 @@ are PowerShell, run from `C:\Projects\GATS`.
 - [ ] M4 LLM extraction (infrastructure for ORDER_WIN; scope confirmed at G1): T4.1 ✅ · T4.2 ✅ · T4.3 ✅ · T4.4 ✅ · T4.5 ⏳ (code ✅; labels: human) · T4.6 ⏳ (code ✅; needs the labels) · T4.7 ⏳ (pre-registered; code ✅; the run needs items 3, 5 and 7)
 - [ ] M5 Intraday data & reaction curves (G1b): T5.1 ⏳ (code ✅; token: human, item 6) · T5.2 ⏳ (code ✅; the fetch needs the token) · T5.3 ⏳ (pre-registered; code ✅; the run needs bars and recorder latency) · T5.4 ⏳ (gate)
 - [ ] M6 Backtester (G2): T6.1 ⏳ (model ✅; broker-calculator check needs the token, item 6) · T6.2 ✅ · T6.3 ✅ · T6.4 ✅ · T6.5 ✅ · T6.6 ✅ · T6.7 ✅ · T6.8 ⏳ (code ✅; the G2 run needs bars, events and T4.7's revenue feature)
-- [ ] M7 Paper trading (G3)
+- [ ] M7 Paper trading (G3): T7.1 ⏳ (in progress)
 - [ ] M8 Live pilot (G4, human-only)
 
 ## Tasks done
@@ -123,6 +123,15 @@ are PowerShell, run from `C:\Projects\GATS`.
 ## Log
 
 - **2026-10-03:**
+  - T7.1 (part 1) the paper run's journal. The paper runtime is the backtest engine fed
+    live, so the engine now takes one item at a time with the moment it was really handed
+    over (`step(item, at)`): a late candle decides late and cannot fill in bars that went
+    by; handing an item over before it is known is refused. `paper_journal` (schema v10)
+    holds every input in order; replaying it rebuilds the account, so a restart needs no
+    state snapshot. Orders and fills are stored as they happen and a replay must reproduce
+    them: changed code is refused instead of rewriting a paper record. What the risk rules
+    were told (liquidity, surveillance, kill switch) is written next to each step and
+    replayed from there. A run belongs to one design hash.
   - T4.7 pre-registered and coded (`docs/research/M4_prereg.md`, hash pinned, committed
     before any return for order wins existed). M3's study with one registered filter:
     order value / trailing revenue >= 10%, both as of the filing; 1%, 5%, 20% reported

@@ -171,3 +171,22 @@ def test_engine_respects_the_order_rate(tmp_path: Path) -> None:
     notes = [o.note for o in burst.orders]
     assert sum(n.startswith("risk: order rate") for n in notes) == 2  # the 6th and 7th that second
     assert sum(o.status != "rejected" for o in burst.orders) == 5
+
+
+def test_the_kill_switch_can_be_answered_by_the_runtime(tmp_path: Path) -> None:
+    """A paper run writes the switch's state down with each decision, so a
+    replay asks the record, not today's file system."""
+    answers = [True, False]
+    base = engine(tmp_path)
+    risk = RiskEngine(
+        base.limits,
+        "test",
+        liquidity=base.liquidity,
+        flags=base.flags,
+        halted=lambda: answers.pop(0),
+        root=tmp_path,
+    )
+    assert "kill switch" in (risk.check(order(), account()) or "")
+    assert risk.check(order(), account()) is None
+    assert answers == []
+    assert not base.kill_switch_on()

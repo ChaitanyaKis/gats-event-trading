@@ -54,9 +54,19 @@ class Lookups:
     """Liquidity and surveillance lookups for the risk engine, by instrument
     key and day, read through the point-in-time clock."""
 
-    def __init__(self, clock: AsOf, windows: Sequence[EventWindow], lookback: int = 20) -> None:
+    def __init__(
+        self,
+        clock: AsOf,
+        securities: Sequence[EventWindow] | Mapping[str, int],
+        lookback: int = 20,
+    ) -> None:
+        """``securities``: the event windows, or instrument key -> security id."""
         self._clock = clock
-        self._security = {w.instrument_key: w.security_id for w in windows}
+        self._security = (
+            dict(securities)
+            if isinstance(securities, Mapping)
+            else {w.instrument_key: w.security_id for w in securities}
+        )
         self._lookback = lookback
         self._turnover: dict[str, list[tuple[date, float]]] = {}
 

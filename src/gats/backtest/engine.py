@@ -193,11 +193,20 @@ class Engine:
             self.step(item)
         return self.finish()
 
-    def step(self, item: MarketEvent | BarEvent) -> None:
-        """Process one item at the moment it became known. A live runtime
-        calls this as items arrive; :meth:`run` calls it over a history. The
-        caller must pass items in time order."""
-        now = moment(item)
+    def step(self, item: MarketEvent | BarEvent, at: datetime | None = None) -> None:
+        """Process one item. A live runtime calls this as items arrive;
+        :meth:`run` calls it over a history. Items must come in time order.
+
+        ``at`` is when the item actually reached the runtime, which live is
+        later than the moment it became known (a filing takes time to fetch
+        and read, a candle to be published). Decisions are made at ``at``,
+        so no order can fill in a bar that began before the runtime could
+        have acted. Earlier than the item's own moment would be look-ahead,
+        and is refused."""
+        known = moment(item)
+        now = known if at is None else at
+        if now < known:
+            raise ValueError(f"look-ahead: an item known at {known} was handed over at {now}")
         self._new_day(to_ist(item.start if isinstance(item, BarEvent) else now).date())
         if isinstance(item, BarEvent):
             self._on_bar(item)
@@ -207,8 +216,25 @@ class Engine:
         for signal in signals:
             self._submit(signal, now)
 
+    def reference(self, instrument_key: str, price: float, as_of: datetime) -> None:
+        """Tell the engine the last price of a stock from a session it was
+        not fed. A live runtime starts watching a stock when a filing
+        arrives; before the open, the previous close is what orders are
+        sized and banded from, exactly what a backtest has from the day
+        before. Never replaces newer data."""
+        if price <= 0:
+            raise ValueError(f"reference price for {instrument_key} must be positive: {price}")
+        st = self.state
+        seen = st.last_data_at.get(instrument_key)
+        if seen is None or as_of > seen:
+            st.last_price[instrument_key] = price
+            st.last_data_at[instrument_key] = as_of
+
     def finish(self) -> BacktestResult:
-        """Close the last day and return everything that happened."""
+        """Close the current day (intraday positions and orders included)
+        and return everything that happened. A live runtime calls this once
+        the session is over; closing the same day again changes nothing.
+        For a look at the account mid-session, use :meth:`result`."""
         self._end_of_day()
         return self.result()
 
@@ -238,6 +264,8 @@ class Engine:
         if st.day == day:
             return
         if st.day is not None:
+            if day < st.day:
+                raise ValueError(f"an item of {day} after {st.day}: items must come in time order")
             self._end_of_day()
         st.day = day
         st.day_high.clear()

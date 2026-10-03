@@ -35,7 +35,7 @@ from sqlalchemy import (
 
 from gats.db.types import UTCDateTime
 
-SCHEMA_VERSION = 9
+SCHEMA_VERSION = 10
 
 metadata = MetaData(
     naming_convention={
@@ -569,4 +569,76 @@ financial_results = Table(
     Column("parser_version", String(32), nullable=False),
     Index(None, "symbol", "available_at"),
     Index(None, "xbrl_status"),
+)
+
+# --- paper trading (M7) --------------------------------------------------------
+# A paper run is one trading system (``design_hash``) run forward in time.
+paper_runs = Table(
+    "paper_runs",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("name", String(64), nullable=False, unique=True),
+    Column("strategy", String(128), nullable=False),
+    Column("design_hash", String(64), nullable=False),
+    Column("design", JSON, nullable=False),
+    Column("git_sha", String(40)),
+    Column("git_dirty", Boolean),
+    Column("created_at", UTCDateTime, nullable=False),
+)
+
+# Everything the paper engine was given, in order, with the moment it was
+# handed over and what the risk engine was told about the outside world.
+# Replaying it rebuilds the account, so this is the run's source of truth.
+paper_journal = Table(
+    "paper_journal",
+    metadata,
+    Column("run_id", Integer, ForeignKey("paper_runs.id"), primary_key=True),
+    Column("seq", Integer, primary_key=True),
+    Column("kind", String(8), nullable=False),  # event | bar | ref | close
+    Column("item_key", String(160), nullable=False),  # the same input is taken once
+    Column("at", UTCDateTime, nullable=False),
+    Column("payload", JSON, nullable=False),
+    Column("answers", JSON),
+    UniqueConstraint("run_id", "item_key"),
+)
+
+# What the engine did, written as it happened. A replay must reproduce these
+# rows exactly, which is how changed code is caught before it rewrites a
+# paper track record.
+paper_orders = Table(
+    "paper_orders",
+    metadata,
+    Column("run_id", Integer, ForeignKey("paper_runs.id"), primary_key=True),
+    Column("order_id", Integer, primary_key=True),
+    Column("instrument_key", String(64), nullable=False),
+    Column("side", String(4), nullable=False),
+    Column("product", String(16), nullable=False),
+    Column("quantity", Integer, nullable=False),
+    Column("limit_price", Float, nullable=False),
+    Column("closes", Boolean, nullable=False),
+    Column("reason", Text, nullable=False),
+    Column("submitted_at", UTCDateTime, nullable=False),
+    Column("eligible_at", UTCDateTime, nullable=False),
+    Column("expires_at", UTCDateTime),
+    Column("filled", Integer, nullable=False),
+    Column("status", String(16), nullable=False),  # working | filled | expired | rejected
+    Column("note", Text, nullable=False),
+    Index(None, "run_id", "status"),
+)
+
+paper_executions = Table(
+    "paper_executions",
+    metadata,
+    Column("run_id", Integer, ForeignKey("paper_runs.id"), primary_key=True),
+    Column("seq", Integer, primary_key=True),
+    Column("order_id", Integer, nullable=False),  # 0: closed by the engine at the day's end
+    Column("instrument_key", String(64), nullable=False),
+    Column("side", String(4), nullable=False),
+    Column("product", String(16), nullable=False),
+    Column("quantity", Integer, nullable=False),
+    Column("price", Float, nullable=False),
+    Column("at", UTCDateTime, nullable=False),
+    Column("charges", Float, nullable=False),
+    Column("reason", Text, nullable=False),
+    Column("bar_volume", Integer, nullable=False),
 )

@@ -394,8 +394,24 @@ class TestSchemaUpgrade:
             version = conn.execute(
                 text("SELECT value FROM schema_meta WHERE key='schema_version'")
             ).scalar_one()
-        assert version == str(SCHEMA_VERSION) == "9"
+        assert version == str(SCHEMA_VERSION)
         assert "financial_results" in inspect(engine).get_table_names()
+        engine.dispose()
+
+    def test_v9_database_gains_the_paper_tables(self, tmp_path: Path) -> None:
+        engine = make_engine(f"sqlite:///{tmp_path / 'v9.db'}")
+        earlier = [t for name, t in metadata.tables.items() if not name.startswith("paper_")]
+        metadata.create_all(engine, tables=earlier)
+        with engine.begin() as conn:
+            conn.execute(text("INSERT INTO schema_meta VALUES ('schema_version', '9')"))
+        init_db(engine)
+        with engine.begin() as conn:
+            version = conn.execute(
+                text("SELECT value FROM schema_meta WHERE key='schema_version'")
+            ).scalar_one()
+        assert version == str(SCHEMA_VERSION) == "10"
+        tables = set(inspect(engine).get_table_names())
+        assert {"paper_runs", "paper_journal", "paper_orders", "paper_executions"} <= tables
         engine.dispose()
 
     def test_newer_database_is_refused(self, tmp_path: Path) -> None:
