@@ -10,6 +10,10 @@ Schema v7 (new tables only), upgraded automatically.
   `gats bars show` summarises a day, and `gats probe upstox-candles`
   checks a day's bars against NSE's end-of-day file. New optional
   dependency (extra `research`): duckdb.
+- **Event-window bars:** `gats bars events --type ORDER_WIN` fetches the
+  1-minute bars around each event (previous, event and next session) for
+  the stock and the Nifty 500, resumably and capped with `--limit`;
+  `gats bars coverage` reports the share of events fully covered.
 
 - **Labelling:** `gats label sample` draws a held-out, stratified evaluation
   sample of order wins (committed before labelling); `gats label review`

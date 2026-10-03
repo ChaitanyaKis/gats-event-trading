@@ -90,6 +90,7 @@ del .env                             # back to real endpoints
 | `gats probe {bse,nse,eod,indices,bands,instruments} [--date YYYY-MM-DD]` | Fetch one sample, save it, report parser coverage |
 | `gats probe upstox-instruments` / `gats probe upstox-candles --symbol RELIANCE --date D` | Upstox's instrument file; one day of 1-minute bars checked against NSE's EOD row (needs the Analytics Token) |
 | `gats bars fetch --symbol X --start D --end D` / `gats bars show --symbol X --date D` | Fetch 1-minute bars month by month into `data/bars/` (resumable); summarise a stored day |
+| `gats bars events --type ORDER_WIN [--limit N]` / `gats bars coverage` | Fetch the bars around every in-scope event (stock + Nifty 500); share of events covered |
 | `gats record` | Run all recorder jobs until stopped |
 | `gats status [--json]` | Problems in plain words first (recorder stopped, job failing > 30 min, BSE throttling, disk, reconcile backlog), then counts, latency, last fetch per job, heartbeat |
 | `gats doctor [--network]` | Health checks with a fix for each problem; `--network` makes one request per source. Exit code 1 on failure |

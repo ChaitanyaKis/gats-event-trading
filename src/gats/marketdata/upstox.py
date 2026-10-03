@@ -15,7 +15,7 @@ import calendar
 from dataclasses import dataclass
 from datetime import date
 
-from sqlalchemy import Connection, select
+from sqlalchemy import Connection, func, select
 
 from gats.db import repo
 from gats.db.schema import bar_months, instrument_snapshots
@@ -174,3 +174,18 @@ def key_for_symbol(conn: Connection, symbol: str) -> str | None:
         .limit(1)
     ).first()
     return None if row is None else upstox.equity_key(str(row.isin))
+
+
+def current_isins(conn: Connection) -> set[str]:
+    """ISINs in the latest NSE instrument snapshot: the ones listed today,
+    which are the ones the broker's instrument keys use."""
+    latest = select(func.max(instrument_snapshots.c.as_of_date)).scalar_subquery()
+    return {
+        str(isin)
+        for isin in conn.execute(
+            select(instrument_snapshots.c.isin).where(
+                instrument_snapshots.c.as_of_date == latest,
+                instrument_snapshots.c.isin.is_not(None),
+            )
+        ).scalars()
+    }

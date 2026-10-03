@@ -1573,3 +1573,90 @@ def bars_show(
         f"{to_ist(summary.last):%H:%M} IST  O {summary.open} H {summary.high} "
         f"L {summary.low} C {summary.close}  V {summary.volume:,}"
     )
+
+
+EventTypes = Annotated[
+    list[str] | None,
+    typer.Option("--type", help="Event type; repeat for more (default ORDER_WIN)."),
+]
+
+
+def _windows(settings: Settings, types: list[str] | None, start: str, end: str | None) -> Any:
+    from gats.marketdata.upstox import current_isins
+    from gats.marketdata.windows import event_windows
+
+    tax = _taxonomy(settings)
+    engine = make_engine(settings.resolved_db_url)
+    init_db(engine)
+    with engine.begin() as conn:
+        return event_windows(
+            AsOf(conn, utcnow()),
+            event_types=set(types or ["ORDER_WIN"]),
+            taxonomy_version=tax.version,
+            start=_parse_day(start),
+            end=_parse_day(end) if end else ist_today(),
+            current_isins=current_isins(conn),
+        )
+
+
+def _print_window_coverage(settings: Settings, windows: Any, index_key: str) -> None:
+    from gats.marketdata.windows import bars_per_day, window_coverage
+
+    cov = window_coverage(windows, bars_per_day(settings.bars_dir), index_key)
+    typer.echo(f"coverage: {cov.covered}/{cov.events} events ({cov.share:.1%}; target 95%)")
+    for year, (covered, events) in sorted(cov.by_year.items()):
+        typer.echo(f"  {year}: {covered}/{events}")
+    for window in cov.missing:
+        typer.echo(
+            f"  missing: #{window.announcement_id} {window.event_type} {window.instrument_key} "
+            f"sessions {', '.join(d.isoformat() for d in window.sessions)}"
+        )
+
+
+@bars_app.command("events")
+def bars_events(
+    types: EventTypes = None,
+    start: Annotated[str, typer.Option(help="First filing day.")] = "2022-01-01",
+    end: Annotated[str | None, typer.Option(help="Last filing day (default today).")] = None,
+    index: Annotated[str, typer.Option(help="Benchmark index name.")] = "Nifty 500",
+    limit: Annotated[int | None, typer.Option(help="Most requests in this run.")] = None,
+) -> None:
+    """Fetch bars around in-scope events: the previous, event and next
+    sessions, for the stock and the index (resumable; needs the token)."""
+    from gats.marketdata.upstox import TokenMissing
+    from gats.marketdata.windows import fetch_needed, months_needed
+
+    settings = _settings()
+    windows, dropped = _windows(settings, types, start, end)
+    index_key = f"NSE_INDEX|{index}"
+    need = months_needed(windows, index_key)
+    typer.echo(
+        f"{len(windows)} events (dropped: {dict(dropped)}); "
+        f"{sum(len(m) for m in need.values())} instrument-months touched"
+    )
+
+    async def main() -> Any:
+        async with _services(settings) as svc:
+            return await fetch_needed(svc, need, limit=limit)
+
+    try:
+        statuses = asyncio.run(main())
+    except TokenMissing as exc:
+        typer.echo(str(exc))
+        raise typer.Exit(1) from exc
+    typer.echo(f"months: {dict(statuses)}")
+    _print_window_coverage(settings, windows, index_key)
+
+
+@bars_app.command("coverage")
+def bars_coverage(
+    types: EventTypes = None,
+    start: Annotated[str, typer.Option(help="First filing day.")] = "2022-01-01",
+    end: Annotated[str | None, typer.Option(help="Last filing day (default today).")] = None,
+    index: Annotated[str, typer.Option(help="Benchmark index name.")] = "Nifty 500",
+) -> None:
+    """Share of in-scope events whose whole window has bars (T5.2 target: 95%)."""
+    settings = _settings(log_to_file=False)
+    windows, dropped = _windows(settings, types, start, end)
+    typer.echo(f"{len(windows)} events (dropped: {dict(dropped)})")
+    _print_window_coverage(settings, windows, f"NSE_INDEX|{index}")
