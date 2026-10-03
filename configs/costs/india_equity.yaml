@@ -1,0 +1,157 @@
+# Indian cash-equity trading costs on NSE, through the user's broker (T6.1).
+#
+# Every value cites an official source and the date it was checked; nothing
+# here is remembered. Rates are fractions of traded value (0.001 = 0.1%)
+# unless a field says rupees. A period runs from `from` to `to` inclusive
+# (open-ended when `to` is absent); the earliest `from` is the earliest date
+# the value was verified, and the cost model refuses earlier dates.
+#
+# Products: delivery (CNC: settled by delivery) and intraday (MIS: squared off
+# the same day, i.e. "settled otherwise than by actual delivery").
+
+version: india-equity-costs-v1
+broker: upstox
+exchange: NSE
+
+components:
+  brokerage:
+    # Broker-specific. Earlier Upstox pricing was not verified, so this
+    # starts on the day it was read.
+    - from: 2026-10-03
+      delivery: {per_order: 20.0}
+      intraday: {per_order: 20.0, cap_fraction: 0.001}  # Rs 20 or 0.1%, whichever is lower
+      source: https://upstox.com/brokerage-charges/
+      checked: 2026-10-03
+
+  stt:
+    # Unchanged for equity cash across NSE's STT circulars 2019-2026 (the
+    # 2019, 2020, 2023, 2024 and 2026 circulars changed only options,
+    # futures and rights entitlements). Rounded to the rupee per order, as
+    # in Upstox's documented calculator example (174.87 -> 175.0).
+    - from: 2019-06-07
+      delivery: {buy: 0.001, sell: 0.001}
+      intraday: {buy: 0.0, sell: 0.00025}
+      round_to: 1.0
+      source:
+        - https://nsearchives.nseindia.com/content/circulars/FATAX41263.pdf
+        - https://nsearchives.nseindia.com/content/circulars/FATAX56235.pdf
+        - https://nsearchives.nseindia.com/content/circulars/FATAX63809.pdf
+        - https://nsearchives.nseindia.com/content/circulars/FATAX73524.pdf
+        - https://www.nseindia.com/static/invest/first-time-investor-sebi-turnover-fees-stt-other-levies
+      checked: 2026-10-03
+
+  exchange_transaction:
+    # NSE cash market, each side. Until 2024-09-30 NSE charged brokers by
+    # monthly-volume slab; the first (highest) slab is used, an upper bound
+    # on what a client paid, except where Upstox published its own rate.
+    # In 2021-2023 EQ stocks outside the Nifty 50 and Next 50 also had
+    # concessional (lower) charges (NSE/FA/46225), so the bound is loose there.
+    - from: 2021-01-01
+      to: 2023-03-31
+      delivery: {buy: 0.0000345, sell: 0.0000345}
+      intraday: {buy: 0.0000345, sell: 0.0000345}
+      note: NSE slab 1, Rs 3.45 per lakh (FA46730, effective 2021-01-01; "existing" in FA56129)
+      source:
+        - https://nsearchives.nseindia.com/content/circulars/FA46730.pdf
+        - https://nsearchives.nseindia.com/content/circulars/FA56129.pdf
+      checked: 2026-10-03
+    - from: 2023-04-01
+      to: 2024-03-31
+      delivery: {buy: 0.0000325, sell: 0.0000325}
+      intraday: {buy: 0.0000325, sell: 0.0000325}
+      note: NSE slab 1 (Rs 3.25 per lakh)
+      source: https://nsearchives.nseindia.com/content/circulars/FA56129.pdf
+      checked: 2026-10-03
+    - from: 2024-04-01
+      to: 2024-09-30
+      delivery: {buy: 0.0000322, sell: 0.0000322}
+      intraday: {buy: 0.0000322, sell: 0.0000322}
+      note: Upstox's published client rate for this period
+      source: https://upstox.com/brokerage-charges/
+      checked: 2026-10-03
+    - from: 2024-10-01
+      to: 2026-02-28
+      delivery: {buy: 0.0000297, sell: 0.0000297}
+      intraday: {buy: 0.0000297, sell: 0.0000297}
+      note: uniform for all members (SEBI true-to-label circular, July 2024)
+      source: https://nsearchives.nseindia.com/content/circulars/FA64232.pdf
+      checked: 2026-10-03
+    - from: 2026-03-01
+      delivery: {buy: 0.000030699, sell: 0.000030699}
+      intraday: {buy: 0.000030699, sell: 0.000030699}
+      note: Rs 306.99 per crore; total with IPFT unchanged at Rs 307
+      source: https://nsearchives.nseindia.com/content/circulars/FA73061.pdf
+      checked: 2026-10-03
+
+  ipft:
+    # NSE Investor Protection Fund Trust contribution, each side.
+    - from: 2021-01-01
+      to: 2023-03-31
+      delivery: {buy: 0.000000001, sell: 0.000000001}
+      intraday: {buy: 0.000000001, sell: 0.000000001}
+      note: >-
+        Rs 0.01 per crore, the "existing" contribution in FA56129 (2023-03-24).
+        Assumed since 2021-01-01: FA46730 funded IPFT through transaction
+        charges, not this contribution.
+      source:
+        - https://nsearchives.nseindia.com/content/circulars/FA56129.pdf
+        - https://nsearchives.nseindia.com/content/circulars/FA46730.pdf
+      checked: 2026-10-03
+    - from: 2023-04-01
+      to: 2026-02-28
+      delivery: {buy: 0.000001, sell: 0.000001}
+      intraday: {buy: 0.000001, sell: 0.000001}
+      note: Rs 10 per crore
+      source:
+        - https://nsearchives.nseindia.com/content/circulars/FA56129.pdf
+        - https://nsearchives.nseindia.com/content/circulars/FA73061.pdf
+      checked: 2026-10-03
+    - from: 2026-03-01
+      delivery: {buy: 0.000000001, sell: 0.000000001}
+      intraday: {buy: 0.000000001, sell: 0.000000001}
+      note: Rs 0.01 per crore
+      source: https://nsearchives.nseindia.com/content/circulars/FA73061.pdf
+      checked: 2026-10-03
+
+  sebi_fee:
+    # Rs 10 per crore: "existing" in SEBI's July 2020 board memo and current
+    # on NSE's page (updated 2026-04-17); assumed unchanged in between. That
+    # memo only proposed halving it for June 2020 to March 2021; adoption was
+    # not verified, so that period is not covered.
+    - from: 2021-04-01
+      delivery: {buy: 0.000001, sell: 0.000001}
+      intraday: {buy: 0.000001, sell: 0.000001}
+      source:
+        - https://www.sebi.gov.in/sebi_data/meetingfiles/jul-2020/1594293677017_1.pdf
+        - https://www.nseindia.com/static/invest/first-time-investor-sebi-turnover-fees-stt-other-levies
+      checked: 2026-10-03
+
+  stamp_duty:
+    # Uniform since 2020-07-01 (Finance Act 2019 amending the Indian Stamp
+    # Act); before that, state rates applied. Buyer pays.
+    - from: 2020-07-01
+      delivery: {buy: 0.00015, sell: 0.0}
+      intraday: {buy: 0.00003, sell: 0.0}
+      source: https://www.nseindia.com/static/invest/first-time-investor-sebi-turnover-fees-stt-other-levies
+      checked: 2026-10-03
+
+  dp:
+    # Depository charge per scrip per day on delivery sells (CDSL Rs 3.50 +
+    # Upstox Rs 16.50); GST is added through the gst component.
+    - from: 2026-10-03
+      delivery_sell_per_scrip_day: 20.0
+      source: https://upstox.com/brokerage-charges/
+      checked: 2026-10-03
+
+  gst:
+    # 18% on broker services; the base per product is Upstox's statement
+    # (SEBI fees and stamp duty are not in it).
+    - from: 2026-10-03
+      rate: 0.18
+      base:
+        delivery: [brokerage, exchange_transaction, dp, ipft]
+        intraday: [brokerage, exchange_transaction, ipft]
+      source:
+        - https://upstox.com/brokerage-charges/
+        - https://www.nseindia.com/static/invest/first-time-investor-sebi-turnover-fees-stt-other-levies
+      checked: 2026-10-03

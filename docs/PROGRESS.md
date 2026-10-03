@@ -5,7 +5,7 @@ Claude Code updates this after every task. Newest log entry first.
 ## Status
 
 - **Version:** 0.2.0 · **Schema:** v7 · **Milestone:** M3 (M1 waits only on T1.6, HUMAN)
-- **Next up:** M5 T5.3 Reaction curves: pre-registration + code (the real run needs bars). Then M6 (T6.1 cost model onwards). Waiting on the human: M3 run (3), labels (5), Upstox token (6)
+- **Next up:** M6 T6.2 Strategy interface, then T6.3 engine + SimBroker, T6.4 risk, T6.5 ledger, T6.6 registry, T6.7 validation. T5.3 waits for live latency (recorder, item 1). Waiting on the human: recorder (1), M3 run (3), labels (5), Upstox token (6)
 
 ## Waiting on the human (HUMAN)
 
@@ -79,7 +79,8 @@ are PowerShell, run from `C:\Projects\GATS`.
    ```
    GATS_UPSTOX_ANALYTICS_TOKEN=<paste the token>
    ```
-   Then type `/gats`. Claude probes the token, checks a day of bars against
+   Then type `/gats`. Claude probes the token, checks the cost model against
+   Upstox's own brokerage calculator (T6.1), checks a day of bars against
    NSE's own end-of-day file, checks that a stock whose ISIN changed still has
    its older bars, and then gives you one resumable command for the full
    event-window fetch (`gats bars events`, about 1–2 h at Upstox's rate limit).
@@ -96,7 +97,7 @@ are PowerShell, run from `C:\Projects\GATS`.
 - [ ] M3 Event study (G1 kill test): T3.0 ⏳ (human) · T3.1 ⚠️ · T3.2 ✅ · T3.3 ✅ · T3.4 ✅ (code; real run ⏳ backfill) · T3.5 ⏳ (gate, after the real run)
 - [ ] M4 LLM extraction (infrastructure for ORDER_WIN; scope confirmed at G1): T4.1 ✅ · T4.2 ✅ · T4.3 ✅ · T4.4 ✅ · T4.5 ⏳ (code ✅; labels: human) · T4.6 · T4.7
 - [ ] M5 Intraday data & reaction curves (G1b): T5.1 ⏳ (code ✅; token: human, item 6) · T5.2 ⏳ (code ✅; the fetch needs the token) · T5.3 · T5.4
-- [ ] M6 Backtester (G2)
+- [ ] M6 Backtester (G2): T6.1 ⏳ (model ✅; broker-calculator check needs the token, item 6) · T6.2 · T6.3 · T6.4 · T6.5 · T6.6 · T6.7 · T6.8
 - [ ] M7 Paper trading (G3)
 - [ ] M8 Live pilot (G4, human-only)
 
@@ -111,6 +112,15 @@ are PowerShell, run from `C:\Projects\GATS`.
 ## Log
 
 - **2026-10-03:**
+  - Order change: T6.1 before T5.3. G1b judges intraday expectancy after costs and our
+    measured live latency; neither existed (costs were a flat M3 assumption, and the recorder
+    has never run), and pre-registering with placeholders would bake them in.
+  - T6.1 model done (broker reconciliation waits on the token). `configs/costs/india_equity.yaml`:
+    every rate from primary sources read today (NSE FA and FATAX circulars 2019-2026, NSE's
+    levies page, SEBI's 2020 memo, Upstox's pages), with effective periods. `gats.backtest.costs`
+    prices a fill at the latest regime by default, or at a date, and refuses dates it cannot
+    vouch for (broker pricing: from today). A Rs 1 lakh intraday round trip costs ~Rs 82.7
+    (0.083%). Caught by the rupees-per-crore test before commit: a 10x slip in the 2026 rate.
   - T5.2 code done (the fetch waits on the token). `gats.marketdata.windows`: each in-scope
     event's previous, event and next regular session (event session = the one containing
     availability, else the next open), months needed for the stock and Nifty 500,

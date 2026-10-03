@@ -102,6 +102,19 @@ new source gets a row here before code depends on it.
   `hasXbrl` (always `true`), `smIndustry` (null on 60%), and `bflag`,
   `csvName`, `old_new`, `orgid` (always null).
 
+## Trading costs (T6.1, read 2026-10-03)
+
+`configs/costs/india_equity.yaml` holds every rate with its source; these
+are the documents behind it.
+
+| What | Source | Says |
+|---|---|---|
+| NSE transaction charges | NSE circulars [FA46730](https://nsearchives.nseindia.com/content/circulars/FA46730.pdf) (2020-12-18), [FA56129](https://nsearchives.nseindia.com/content/circulars/FA56129.pdf) (2023-03-24), [FA64232](https://nsearchives.nseindia.com/content/circulars/FA64232.pdf) (2024-09-27), [FA73061](https://nsearchives.nseindia.com/content/circulars/FA73061.pdf) (2026-02-27) | Cash market, per side: slab 1 Rs 3.45/lakh from 2021-01-01 (concessional rates for EQ stocks outside the Nifty 50/Next 50, NSE/FA/46225), Rs 3.25/lakh from 2023-04-01 (slab-wise by member volume), uniform Rs 2.97/lakh from 2024-10-01, Rs 306.99/crore from 2026-03-01. IPFT contribution: Rs 0.01/crore, Rs 10/crore from 2023-04-01, Rs 0.01/crore from 2026-03-01. FA73061 cites the 2024 circular as "64323"; the real one is 64232. |
+| STT | NSE circulars [FATAX41263](https://nsearchives.nseindia.com/content/circulars/FATAX41263.pdf) (2019-06-07), [FATAX56235](https://nsearchives.nseindia.com/content/circulars/FATAX56235.pdf) (2023-04-01), [FATAX63809](https://nsearchives.nseindia.com/content/circulars/FATAX63809.pdf) (2024-09-09), [FATAX73524](https://nsearchives.nseindia.com/content/circulars/FATAX73524.pdf) (2026-03-31); FATAX41919 and 43604 (2019-2020: options and rights entitlements only) | Equity delivery 0.1% buy and sell; non-delivery sell 0.025%; unchanged throughout (only F&O rates moved: options 0.05 -> 0.0625 -> 0.10 -> 0.15%, futures 0.01 -> 0.0125 -> 0.02 -> 0.05%). |
+| SEBI fee, stamp duty, GST | [NSE: SEBI turnover fees, STT and other levies](https://www.nseindia.com/static/invest/first-time-investor-sebi-turnover-fees-stt-other-levies) (updated 2026-04-17); [SEBI board memo, July 2020](https://www.sebi.gov.in/sebi_data/meetingfiles/jul-2020/1594293677017_1.pdf) | SEBI fee 0.0001% (Rs 10/crore; the memo only *proposed* halving it for 2020-06 to 2021-03). Stamp duty (buyer) 0.015% delivery, 0.003% non-delivery, uniform since 2020-07-01. GST 18% on broker services. The page is behind bot protection: fetch with a browser user agent. |
+| Broker (Upstox) | [upstox.com/brokerage-charges](https://upstox.com/brokerage-charges/) | Brokerage Rs 20/order delivery, min(Rs 20, 0.1%) intraday. DP Rs 20/scrip/day on delivery sells (CDSL 3.50 + Upstox 16.50). GST base: brokerage + transaction + IPFT (+ DP for delivery). NSE client rate 0.00322% for 2024-04-01 to 2024-09-30. The page contradicts itself on IPFT (Rs 0.10/lakh and Rs 0.01/crore) and still shows 0.00297% after March 2026: the NSE circulars win (SEBI's true-to-label rule passes exchange charges through unchanged). |
+| Broker calculator API | `GET https://api.upstox.com/v2/charges/brokerage?instrument_token=&quantity=&product=D\|I&transaction_type=BUY\|SELL&price=` (docs: get-brokerage) | DOCUMENTED, not probed (needs the token). `gats probe upstox-charges` compares five orders with the model; its replies become the reconciliation fixtures. The docs example rounds STT to the rupee (174.87 -> 175.0). |
+
 ## To verify (candidates; do not rely on these until probed)
 
 | Need | Candidate | Task |

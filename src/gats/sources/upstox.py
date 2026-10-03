@@ -168,3 +168,51 @@ def parse_candles(payload: bytes, *, instrument_key: str) -> ParseResult[Bar]:
     result.records.sort(key=lambda bar: bar.ts)
     result.meta = {"candles": len(candles)}
     return result
+
+
+CHARGES_KIND = "upstox_charges"
+# The broker's names for each charge -> the cost model's (gats.backtest.costs).
+CHARGE_FIELDS = {
+    "brokerage": "brokerage",
+    "taxes.stt": "stt",
+    "taxes.stamp_duty": "stamp_duty",
+    "taxes.gst": "gst",
+    "other_charges.transaction": "exchange_transaction",
+    "other_charges.ipft": "ipft",
+    "other_charges.sebi_turnover": "sebi_fee",
+    "other_charges.clearing": "clearing",
+}
+
+
+def charges_url(
+    base: str, instrument_key: str, quantity: int, product: str, side: str, price: float
+) -> str:
+    """The brokerage-calculator URL (``product`` D or I, ``side`` BUY or SELL)."""
+    return (
+        f"{base.rstrip('/')}/v2/charges/brokerage?instrument_token={quote(instrument_key, safe='')}"
+        f"&quantity={quantity}&product={product}&transaction_type={side}&price={price}"
+    )
+
+
+def parse_charges(payload: bytes) -> dict[str, float]:
+    """The broker's charge breakdown for one order, in the cost model's
+    names (documented reply; not yet probed), plus ``total``."""
+    body = _load_json(payload, "charges")
+    if not isinstance(body, dict) or body.get("status") != "success":
+        raise PayloadError(f"charges: unexpected reply {str(body)[:200]}")
+    charges = (body.get("data") or {}).get("charges")
+    if not isinstance(charges, dict):
+        raise PayloadError("charges: no data.charges object")
+    out: dict[str, float] = {}
+    for path, name in CHARGE_FIELDS.items():
+        node: Any = charges
+        for part in path.split("."):
+            node = node.get(part) if isinstance(node, dict) else None
+        value = _opt_float(node)
+        if value is not None:
+            out[name] = value
+    total = _opt_float(charges.get("total"))
+    if total is None:
+        raise PayloadError("charges: no total")
+    out["total"] = total
+    return out

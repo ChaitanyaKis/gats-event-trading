@@ -106,6 +106,7 @@ class ProbeTarget(StrEnum):
     instruments = "instruments"
     upstox_instruments = "upstox-instruments"
     upstox_candles = "upstox-candles"
+    upstox_charges = "upstox-charges"
 
 
 class AnnSource(StrEnum):
@@ -240,6 +241,8 @@ def probe(
     probes_dir = settings.data_dir / "probes"
     probes_dir.mkdir(parents=True, exist_ok=True)
     when = _parse_day(day) if day else None
+    if target is ProbeTarget.upstox_charges:
+        raise typer.Exit(asyncio.run(_probe_upstox_charges(settings, symbol, probes_dir)))
     if target in (ProbeTarget.upstox_instruments, ProbeTarget.upstox_candles):
         raise typer.Exit(asyncio.run(_probe_upstox(settings, target, when, symbol, probes_dir)))
 
@@ -1660,3 +1663,75 @@ def bars_coverage(
     windows, dropped = _windows(settings, types, start, end)
     typer.echo(f"{len(windows)} events (dropped: {dict(dropped)})")
     _print_window_coverage(settings, windows, f"NSE_INDEX|{index}")
+
+
+# Orders sent to the broker's calculator to check the cost model (T6.1).
+_CHARGE_EXAMPLES: tuple[tuple[str, str, int, float], ...] = (
+    ("intraday", "buy", 100, 1000.0),
+    ("intraday", "sell", 100, 1010.0),
+    ("intraday", "buy", 10, 100.0),  # brokerage capped at 0.1%
+    ("delivery", "buy", 50, 2000.0),
+    ("delivery", "sell", 50, 2000.0),  # pays DP charges
+)
+
+
+async def _probe_upstox_charges(settings: Settings, symbol: str, probes_dir: Path) -> int:
+    """The broker's own calculator vs our cost model, order by order."""
+    from gats.backtest.costs import CostModel, Fill
+    from gats.marketdata.upstox import TokenMissing, auth_headers, key_for_symbol
+    from gats.sources import upstox
+
+    model = CostModel.load(Path("configs/costs/india_equity.yaml"))
+    differences = 0
+    async with _services(settings) as svc:
+        with svc.engine.begin() as conn:
+            key = key_for_symbol(conn, symbol)
+        if key is None:
+            typer.echo(f"no ISIN for {symbol} yet: run `gats probe instruments` first")
+            return 1
+        try:
+            headers = auth_headers(svc)
+        except TokenMissing as exc:
+            typer.echo(str(exc))
+            return 1
+        for product, side, quantity, price in _CHARGE_EXAMPLES:
+            url = upstox.charges_url(
+                svc.settings.upstox_api_base, key, quantity,
+                "D" if product == "delivery" else "I", side.upper(), price,
+            )  # fmt: skip
+            try:
+                got = await svc.client.get(url, headers=headers)
+            except FetchError as exc:
+                typer.echo(f"FETCH FAILED: {exc}")
+                return 1
+            with svc.engine.begin() as conn:
+                repo.save_raw(
+                    conn, svc.store, got.content, kind=upstox.CHARGES_KIND,
+                    source=upstox.SOURCE, url=got.url, content_type=got.content_type,
+                    fetched_at=got.fetched_at,
+                    meta={"product": product, "side": side, "quantity": quantity, "price": price},
+                )  # fmt: skip
+            stamp = utcnow().strftime("%Y%m%dT%H%M%SZ")
+            (probes_dir / f"upstox-charges-{product}-{side}-{quantity}-{stamp}.json").write_bytes(
+                got.content
+            )
+            typer.echo(f"{product} {side} {quantity} x {price}: HTTP {got.status}")
+            if not got.ok:
+                typer.echo(f"  first bytes: {got.content[:300]!r}")
+                return 1
+            try:
+                theirs = upstox.parse_charges(got.content)
+            except PayloadError as exc:
+                typer.echo(f"  PARSE FAILED: {exc}")
+                return 1
+            ours = model.charges(Fill(side, product, price, quantity, ist_today()))  # type: ignore[arg-type]
+            mine = {name: getattr(ours, name) for name in theirs if hasattr(ours, name)}
+            mine["total"] = ours.total
+            for name, value in theirs.items():
+                expected = mine.get(name)
+                same = expected is not None and abs(expected - value) <= 0.01
+                differences += not same
+                shown = "-" if expected is None else f"{expected:.2f}"
+                verdict = "ok" if same else "DIFFERS"
+                typer.echo(f"  {name:21} broker {value:10.2f}  model {shown:>10}  {verdict}")
+    return 1 if differences else 0

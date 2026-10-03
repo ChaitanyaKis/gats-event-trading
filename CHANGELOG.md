@@ -10,6 +10,11 @@ Schema v7 (new tables only), upgraded automatically.
   `gats bars show` summarises a day, and `gats probe upstox-candles`
   checks a day's bars against NSE's end-of-day file. New optional
   dependency (extra `research`): duckdb.
+- **Trading costs:** `configs/costs/india_equity.yaml` holds every Indian
+  cash-equity charge (brokerage, STT, NSE transaction and IPFT, SEBI fee,
+  stamp duty, DP, GST) with its official source and effective dates;
+  `gats.backtest.costs.CostModel` prices any order. `gats probe
+  upstox-charges` compares it with the broker's own calculator.
 - **Event-window bars:** `gats bars events --type ORDER_WIN` fetches the
   1-minute bars around each event (previous, event and next session) for
   the stock and the Nifty 500, resumably and capped with `--limit`;
