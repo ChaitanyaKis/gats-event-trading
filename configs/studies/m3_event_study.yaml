@@ -1,0 +1,70 @@
+# M3 event study: the machine-readable half of docs/research/M3_prereg.md.
+#
+# Pre-registered. The engine refuses to run unless this file's hash equals
+# the one recorded in the pre-registration; any change is a new study and a
+# new trial (docs/research/trials.md).
+
+study: m3-disclosure-drift
+taxonomy_version: taxonomy-v1+6f16e1c9
+
+data:
+  source: NSE                      # NSE filings and NSE prices only (see prereg 2)
+  start: 2019-10-01                # first valid sec_bhavdata_full file
+  end: 2026-09-30
+  train_end: 2023-12-31            # events up to here are "train"
+  test_start: 2024-01-01           # the holdout: used once, for G1
+
+events:
+  # Confirmatory hypotheses: long, expected sign positive. Only these can pass G1.
+  confirmatory: [ORDER_WIN, RATING_UP, BUYBACK, BONUS_SPLIT, PRESS_RELEASE]
+  # Reported, never eligible to pass (direction not hypothesised or not tradable long).
+  exploratory: [RESULTS, DIVIDEND, ACQUISITION, FUNDRAISE, PLEDGE_CHANGE, BUSINESS_UPDATE,
+                MGMT_CHANGE, RATING_DOWN, PENALTY_LITIGATION, INSOLVENCY, HOLDING_CHANGE,
+                BOARD_OUTCOME]
+  # NSE categories that are progress reports of an announced buyback, not news.
+  exclude_categories: ["Daily Buy Back of equity shares", "Closure of Buy Back",
+                       "Post Buyback Public Announcement"]
+  # Filings disseminated before NSE published seconds (no exchdisstime, an_dt
+  # at :00) are taken as available at the END of their minute.
+  minute_precision_delay_s: 60
+  # A second event of the same type for the same security within this many
+  # sessions of the first is dropped (one disclosure, several filings).
+  same_type_cooldown_sessions: 5
+
+entry:
+  rule: first regular session open strictly after available_at
+  price: OPEN_PRICE                # NSE bhavcopy open (pre-open auction price)
+
+exits:                             # all close prices; 0 = the entry session itself
+  - {name: d0, sessions_after_entry: 0}
+  - {name: d1, sessions_after_entry: 1}
+  - {name: d3, sessions_after_entry: 3}
+  - {name: d5, sessions_after_entry: 5}
+
+benchmark:
+  index: Nifty 500                 # same open->close window, market-adjusted
+  model: market_adjusted           # abnormal = stock return - index return
+
+filters:
+  series: [EQ]                     # BE/BZ trade-for-trade excluded
+  min_median_turnover_rs: 10000000 # 20-session median traded value before the event, Rs 1 crore
+  turnover_lookback_sessions: 20
+  min_prev_close_rs: 10
+  # Historical price bands are not available (recorded only from 2026-10), so
+  # untradeable entries are detected from the bhavcopy itself:
+  skip_locked_entry_day: true      # HIGH == LOW on the entry session
+  max_entry_gap: 0.195             # |OPEN / PREV_CLOSE - 1| >= 19.5%: at or near a circuit
+  exclude_review_actions: true     # rights/demerger days inside the window (needs_review)
+
+costs:
+  # Assumption until M6's verified cost model: a conservative flat round trip
+  # covering brokerage, taxes, exchange fees and slippage. Not a fee claim.
+  round_trip: 0.005                # 0.50%, all horizons
+
+statistics:
+  cluster: event_date              # standard errors clustered by entry date
+  bootstrap_resamples: 10000
+  bootstrap_seed: 20261003
+  fdr: {method: benjamini-hochberg, q: 0.05, family: confirmatory x exits}
+  ci: fcr_adjusted                 # Benjamini-Yekutieli FCR level for selected tests
+  min_test_events: 100

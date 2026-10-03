@@ -5,7 +5,7 @@ Claude Code updates this after every task. Newest log entry first.
 ## Status
 
 - **Version:** 0.2.0 · **Schema:** v5 · **Milestone:** M3 (M1 waits only on T1.6, HUMAN)
-- **Next up:** T3.2 Pre-registration (T3.0 plan is waiting for the human: item 3)
+- **Next up:** T3.3 Event-study engine (T3.0 plan is waiting for the human: item 3)
 
 ## Waiting on the human (HUMAN)
 
