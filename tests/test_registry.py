@@ -138,10 +138,10 @@ def test_failed_backtest_is_recorded(engine: Engine) -> None:
     with pytest.raises(RuntimeError, match="bug in the strategy"):
         run_backtest(
             engine, Broken(), bars(A, at(10, 0), flat(100, 3)), costs=COSTS, config=CFG,
-            data_start=D1, data_end=D1, holdout=True,
+            data_start=D1, data_end=D1, holdout=False,
         )  # fmt: skip
     (row,) = rows(engine)
-    assert (row.status, row.holdout) == ("failed", True) and "bug in the strategy" in row.error
+    assert (row.status, row.holdout) == ("failed", False) and "bug in the strategy" in row.error
 
 
 def test_cli_lists_runs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
