@@ -1,0 +1,68 @@
+# M4 magnitude study: the machine-readable half of
+# docs/research/M4_prereg.md.
+#
+# Pre-registered. The engine refuses to run unless this file's hash equals
+# the one recorded in the pre-registration; any change is a new study and a
+# new trial. Everything except `magnitude`, the event list, the data start
+# and the FDR level is M3's design, unchanged.
+
+study: m4-order-magnitude
+taxonomy_version: taxonomy-v1+6f16e1c9
+
+data:
+  source: NSE
+  start: 2022-01-01                # trailing revenue needs four quarters of results from 2021
+  end: 2026-09-30
+  train_end: 2023-12-31
+  test_start: 2024-01-01           # M3's holdout, read a second time (see fdr.q)
+
+events:
+  confirmatory: [ORDER_WIN]
+  exploratory: []
+  exclude_categories: []
+  minute_precision_delay_s: 60
+  same_type_cooldown_sessions: 5
+
+magnitude:
+  # An event is kept only if the order's rupee value, extracted from the
+  # filing, is at least this share of the company's trailing revenue as
+  # known when the filing appeared.
+  min_amount_vs_revenue: 0.10
+  extractor: "cascade:"            # extraction versions used, newest per filing
+  exploratory_thresholds: [0.01, 0.05, 0.20]   # reported, never eligible to pass
+
+entry:
+  rule: first regular session open strictly after available_at
+  price: OPEN_PRICE
+
+exits:
+  - {name: d0, sessions_after_entry: 0}
+  - {name: d1, sessions_after_entry: 1}
+  - {name: d3, sessions_after_entry: 3}
+  - {name: d5, sessions_after_entry: 5}
+
+benchmark:
+  index: Nifty 500
+  model: market_adjusted
+
+filters:
+  series: [EQ]
+  min_median_turnover_rs: 10000000
+  turnover_lookback_sessions: 20
+  min_prev_close_rs: 10
+  skip_locked_entry_day: true
+  max_entry_gap: 0.195
+  exclude_review_actions: true
+
+costs:
+  round_trip: 0.005                # M3's conservative flat round trip, kept for comparability
+
+statistics:
+  cluster: event_date
+  bootstrap_resamples: 10000
+  bootstrap_seed: 20261003
+  # The test period was already read once by M3. This study is the second
+  # on the same holdout, so its false-discovery level is halved.
+  fdr: {method: benjamini-hochberg, q: 0.025, family: ORDER_WIN at or above the threshold x exits}
+  ci: fcr_adjusted
+  min_test_events: 100
