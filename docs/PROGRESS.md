@@ -67,7 +67,7 @@ are PowerShell, run from `C:\Projects\GATS`.
 - [x] M1 core recorder (0.1.0 → 0.1.2)
 - [ ] M1 finishing: T1.1 ✅ · T1.2 ✅ · T1.3 ✅ · T1.4 ✅ · T1.5 ✅ · T1.6
 - [x] M2 Reference data & entity resolution (0.2.0): T2.1 ✅ · T2.2 ✅ · T2.3 ✅ · T2.4 ✅ · T2.5 ✅ · T2.6 ✅ · T2.7 ✅ · T2.8 ✅ · T2.9 ✅
-- [ ] M3 Event study (G1 kill test): T3.0 ⏳ (human) · T3.1 ⚠️ ·  T3.2 · T3.3 · T3.4 · T3.5
+- [ ] M3 Event study (G1 kill test): T3.0 ⏳ (human) · T3.1 ⚠️ · T3.2 ✅ · T3.3 · T3.4 · T3.5
 - [ ] M4 LLM extraction
 - [ ] M5 Intraday data & reaction curves (G1b)
 - [ ] M6 Backtester (G2)
@@ -85,6 +85,12 @@ are PowerShell, run from `C:\Projects\GATS`.
 ## Log
 
 - **2026-10-03:**
+  - T3.2 done: `docs/research/M3_prereg.md` + `configs/studies/m3_event_study.yaml`
+    (hash pinned in the prereg; the engine must refuse a mismatch) committed
+    before any event return was computed. 5 confirmatory long hypotheses
+    (ORDER_WIN, RATING_UP, BUYBACK, BONUS_SPLIT, PRESS_RELEASE) × 4 exits =
+    20 tests, BH q=0.05, FCR-adjusted CIs; train ≤ 2023-12-31, test
+    2024-01-01 → 2026-09-30 used once; flat 0.50% round-trip cost assumption.
   - T3.1 done, **acceptance missed**: `configs/event_taxonomy.yaml`
     (`taxonomy-v1`, stored as `taxonomy-v1+<file hash>` so an edit is always
     a new version), `announcement_event_types`, `gats events
