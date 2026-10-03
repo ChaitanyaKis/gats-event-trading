@@ -11,9 +11,15 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Any
 
-from sqlalchemy import Connection, Row, select
+from sqlalchemy import Connection, Row, func, select
 
-from gats.db.schema import announcements, eod_prices, price_bands
+from gats.db.schema import (
+    announcement_event_group,
+    announcement_security,
+    announcements,
+    eod_prices,
+    price_bands,
+)
 from gats.refdata.master import Resolver
 from gats.timeutil import ensure_aware, to_ist
 
@@ -90,3 +96,34 @@ class AsOf:
         if self._resolver is None:
             self._resolver = Resolver.load(self._conn)
         return self._resolver.resolve(id_type, value, day, known_at=self._as_of if strict else None)
+
+    def events_since(self, since: datetime) -> list[Row[Any]]:
+        """Events (a disclosure, merged across BSE and NSE) that became
+        available in ``(since, as_of]``.
+
+        Only member filings available by the clock count, so a twin filed on
+        the other exchange later can neither make an event visible sooner nor
+        move its time. Filings not yet grouped (``gats refdata dedupe``) are
+        not returned.
+        """
+        a, g, link = announcements, announcement_event_group, announcement_security
+        return list(
+            self._conn.execute(
+                select(
+                    g.c.event_group_id,
+                    func.min(a.c.event_ts).label("event_ts"),
+                    func.min(a.c.available_at).label("available_at"),
+                    func.max(link.c.security_id).label("security_id"),
+                    func.count().label("n_filings"),
+                )
+                .select_from(
+                    a.join(g, g.c.announcement_id == a.c.id).outerjoin(
+                        link, link.c.announcement_id == a.c.id
+                    )
+                )
+                .where(a.c.available_at <= self._as_of)
+                .group_by(g.c.event_group_id)
+                .having(func.min(a.c.available_at) > ensure_aware(since))
+                .order_by(func.min(a.c.available_at))
+            )
+        )

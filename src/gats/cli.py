@@ -12,12 +12,12 @@ import sys
 from collections import Counter
 from collections.abc import AsyncIterator
 from dataclasses import asdict, fields
-from datetime import date, timedelta
+from datetime import date, time, timedelta
 from enum import StrEnum
 from typing import Annotated, Any
 
 import typer
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from gats import __version__, ingest
 from gats.config import Settings
@@ -25,6 +25,7 @@ from gats.db import repo
 from gats.db.engine import SchemaVersionError, init_db, make_engine
 from gats.db.schema import (
     SCHEMA_VERSION,
+    announcements,
     fetch_log,
     raw_documents,
     securities,
@@ -36,7 +37,7 @@ from gats.logging_setup import configure_logging
 from gats.net import FetchError, PoliteClient
 from gats.rawstore import RawStore
 from gats.recorder import run_recorder
-from gats.refdata import master
+from gats.refdata import dedupe, master
 from gats.refdata.coverage import bse_scrip_isin_coverage, link_coverage
 from gats.refdata.ingest import ingest_bse_scrips, ingest_nse_symbol_changes
 from gats.refdata.link import link_pending
@@ -44,7 +45,7 @@ from gats.sources import bse, bse_scrips, nse, nse_archives, nse_symbols
 from gats.sources._util import preview
 from gats.sources.models import PayloadError
 from gats.status import build_report
-from gats.timeutil import daterange, ist_today, utcnow
+from gats.timeutil import daterange, ist_datetime, ist_today, to_ist, utcnow
 
 app = typer.Typer(
     add_completion=False, no_args_is_help=True, help="GATS data recorder and research tools."
@@ -707,3 +708,42 @@ def refdata_resolve(
             f"  {ident.id_type:10} {ident.value:12} [{start or '...'}, {ident.valid_to or '...'})"
             f"  source={ident.source}"
         )
+
+
+@refdata_app.command("dedupe")
+def refdata_dedupe(
+    start: Annotated[str | None, typer.Option(help="First day (default: earliest filing).")] = None,
+    end: Annotated[str | None, typer.Option(help="Last day, inclusive (default: today).")] = None,
+) -> None:
+    """Group BSE/NSE filings of the same disclosure into events (idempotent)."""
+    settings = _settings()
+    engine = make_engine(settings.resolved_db_url)
+    init_db(engine)
+    with engine.begin() as conn:
+        first_ts = conn.execute(select(func.min(announcements.c.event_ts))).scalar()
+    if first_ts is None:
+        typer.echo("no filings yet")
+        engine.dispose()
+        return
+    first = _parse_day(start) if start else to_ist(first_ts).date()
+    last = _parse_day(end) if end else ist_today()
+    total = dedupe.DedupeStats()
+    day = first
+    while day <= last:  # a month per transaction keeps memory and locks small
+        chunk_end = min(last, day + timedelta(days=30))
+        with engine.begin() as conn:
+            stats = dedupe.group_range(
+                conn,
+                ist_datetime(day, time()),
+                ist_datetime(chunk_end + timedelta(days=1), time()),
+                utcnow(),
+            )
+        total.filings += stats.filings
+        total.pairs += stats.pairs
+        total.singles += stats.singles
+        day = chunk_end + timedelta(days=1)
+    engine.dispose()
+    typer.echo(
+        f"{total.filings} filings: {total.pairs} cross-exchange pairs, "
+        f"{total.singles} single-exchange events (rules {dedupe.RULES_VERSION})"
+    )

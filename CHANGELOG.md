@@ -1,7 +1,10 @@
 # Changelog
 
 ## Unreleased
-- Announcements store the attachment size each exchange reports
+- **Cross-exchange events:** the same disclosure filed on BSE and NSE is
+  grouped into one event timed at the earliest dissemination (recorder job
+  `dedupe`, `gats refdata dedupe` for history). Research reads events via
+  `AsOf.events_since()`.- Announcements store the attachment size each exchange reports
   (`attachment_size`, schema v5; parsers `bse-ann-v2`, `nse-ann-v3`). Run
   `gats reparse bse_ann` and `gats reparse nse_ann` to fill older rows.
 - Fix: `gats reparse bse_ann|nse_ann` skipped rows whose payload had first

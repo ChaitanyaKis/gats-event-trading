@@ -151,6 +151,9 @@ class Settings(BaseSettings):
     # (taken from daily_snapshot_after_ist), and new filings are linked to it.
     master_build_after_ist: time = time(9, 0)
     link_poll_s: float = Field(default=60.0, gt=0)
+    # Cross-exchange grouping of recent filings (rules: gats.refdata.dedupe).
+    dedupe_poll_s: float = Field(default=300.0, gt=0)
+    dedupe_lookback_days: int = Field(default=2, ge=1)
     snapshot_check_s: float = Field(default=1800.0, gt=0)
     daily_snapshot_after_ist: time = time(8, 0)
 

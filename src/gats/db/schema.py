@@ -308,3 +308,15 @@ announcement_security = Table(
     Column("linked_at", UTCDateTime, nullable=False),
     Index(None, "security_id"),
 )
+
+# The event each filing belongs to (T2.5): the same disclosure on BSE and NSE
+# shares one event_group_id (the smaller announcement id of the pair).
+announcement_event_group = Table(
+    "announcement_event_group",
+    metadata,
+    Column("announcement_id", Integer, ForeignKey("announcements.id"), primary_key=True),
+    Column("event_group_id", Integer, nullable=False),
+    Column("rule_version", String(32), nullable=False),
+    Column("grouped_at", UTCDateTime, nullable=False),
+    Index(None, "event_group_id"),
+)

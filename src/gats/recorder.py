@@ -24,7 +24,7 @@ from gats.db import repo
 from gats.db.repo import IngestMode
 from gats.ingest import Outcome, Services
 from gats.logging_setup import kv
-from gats.refdata import master, versions
+from gats.refdata import dedupe, master, versions
 from gats.refdata.ingest import ingest_bse_scrips, ingest_nse_symbol_changes
 from gats.refdata.link import link_pending
 from gats.sources import bse_scrips, nse_archives, nse_symbols
@@ -259,6 +259,26 @@ class LinkJob:
 
 
 @dataclass
+class DedupeJob:
+    """Pair recent BSE/NSE filings of the same disclosure into one event."""
+
+    name: str
+    poll_s: float
+    lookback_days: int
+
+    def interval_s(self, now: datetime) -> float:
+        return self.poll_s
+
+    async def run_once(self, svc: Services) -> Outcome:
+        now = svc.clock()
+        with svc.engine.begin() as conn:
+            stats = dedupe.group_range(
+                conn, now - timedelta(days=self.lookback_days), now + timedelta(minutes=1), now
+            )
+        return Outcome(ok=True, n_records=stats.filings, meta={"pairs": stats.pairs})
+
+
+@dataclass
 class AttachmentsJob:
     name: str
     poll_s: float
@@ -379,6 +399,7 @@ def build_jobs(svc: Services) -> list[Job]:
             )
         jobs.append(MasterBuildJob("master_build", s.snapshot_check_s, s.master_build_after_ist))
         jobs.append(LinkJob("link", s.link_poll_s))
+        jobs.append(DedupeJob("dedupe", s.dedupe_poll_s, s.dedupe_lookback_days))
     if s.attachments_enabled:
         jobs.append(AttachmentsJob("attachments", s.attachments_poll_s))
     sources = tuple(

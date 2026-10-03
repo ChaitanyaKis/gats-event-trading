@@ -5,7 +5,7 @@ Claude Code updates this after every task. Newest log entry first.
 ## Status
 
 - **Version:** 0.1.2 · **Schema:** v4 · **Milestone:** M2 (M1 waits only on T1.6, HUMAN)
-- **Next up:** T2.5 Cross-exchange dedupe
+- **Next up:** T2.6 Trading calendar
 
 ## Waiting on the human (HUMAN)
 
@@ -24,6 +24,10 @@ are PowerShell, run from `C:\Projects\GATS`.
    ```
    Then send back the CI run URL (or type `/gats`; Claude checks `gh run list`).
 
+3. **Optional (T2.5):** spot-check a few of the 50 pairs in
+   `docs/research/dedupe_v1_review.md` (each shows both exchanges' text) and
+   tell Claude if any verdict looks wrong.
+
 ## Blocked
 
 (none)
@@ -32,7 +36,7 @@ are PowerShell, run from `C:\Projects\GATS`.
 
 - [x] M1 core recorder (0.1.0 → 0.1.2)
 - [ ] M1 finishing: T1.1 ✅ · T1.2 ✅ · T1.3 ✅ · T1.4 ✅ · T1.5 ✅ · T1.6
-- [ ] M2 Reference data & entity resolution: T2.1 ✅ · T2.2 ✅ · T2.3 ✅ · T2.4 ✅ · T2.5 · T2.6 · T2.7 · T2.8 · T2.9
+- [ ] M2 Reference data & entity resolution: T2.1 ✅ · T2.2 ✅ · T2.3 ✅ · T2.4 ✅ · T2.5 ✅ · T2.6 · T2.7 · T2.8 · T2.9
 - [ ] M3 Event study (G1 kill test)
 - [ ] M4 LLM extraction
 - [ ] M5 Intraday data & reaction curves (G1b)
@@ -51,6 +55,16 @@ are PowerShell, run from `C:\Projects\GATS`.
 ## Log
 
 - **2026-10-03:**
+  - T2.5 done. Same disclosure on BSE+NSE → one event (`announcement_event_group`,
+    rules `dedupe-v1` in `gats.refdata.dedupe`): attachment size (BSE exact
+    bytes vs NSE display size), time gap and topic-word similarity, greedy
+    one-to-one. **Hand check of 50 random pairs: 47 same disclosure, 3
+    uncertain, 0 wrong (precision 94–100%)**, see
+    `docs/research/dedupe_v1_review.md`. 5,302 pairs on 30 days. Recorder job
+    `dedupe` (every 5 min, last 2 days); `gats refdata dedupe`;
+    `AsOf.events_since()` (only members available by the clock count; leak test).
+  - Found and fixed: reparse skipped rows whose payload a probe stored first
+    (content-addressed raw store keeps the first kind).
   - T2.4 done. `announcement_security` links (NSE: ISIN on the event date,
     else symbol as of `first_seen_at`; BSE: scrip code). Recorder jobs
     `master_build` (daily, after 09:00 IST) and `link` (every 60 s; unresolved
