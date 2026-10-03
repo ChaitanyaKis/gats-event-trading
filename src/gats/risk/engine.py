@@ -38,6 +38,7 @@ class RiskLimits(BaseModel):
     max_position_pct_equity: float = Field(gt=0, le=1)
     max_open_positions: int = Field(ge=1)
     max_daily_loss_pct_equity: float = Field(gt=0, le=1)
+    max_drawdown_pct_equity: float = Field(gt=0, le=1)
     max_symbol_notional: float = Field(gt=0)
     min_median_turnover_rs: float = Field(ge=0)
     block_flags: frozenset[str] = frozenset()

@@ -8,6 +8,8 @@ version: risk-v1
 max_position_pct_equity: 0.10       # one position's notional, share of equity
 max_open_positions: 5               # held plus being bought
 max_daily_loss_pct_equity: 0.02     # today's realised + unrealised loss stops new entries
+max_drawdown_pct_equity: 0.10       # a strategy's peak-to-trough limit: G2 judges against
+                                    # it and production disables a strategy beyond it
 max_symbol_notional: 200000         # rupees in one stock, held plus being bought
 min_median_turnover_rs: 10000000    # Rs 1 crore a day (20-session median), as in M3
 block_flags: [ASM, GSM, T2T]        # surveillance lists and trade-for-trade series

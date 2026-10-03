@@ -10,6 +10,10 @@ Schema v8 (new tables only), upgraded automatically.
   `gats bars show` summarises a day, and `gats probe upstox-candles`
   checks a day's bars against NSE's end-of-day file. New optional
   dependency (extra `research`): duckdb.
+- **Backtest command:** `gats backtest run --start D --end D` runs a
+  registered backtest over stored events and bars (risk limits and verified
+  costs applied) and writes `reports/M6_backtest.md`, judging gate G2's
+  criteria mechanically.
 - **Backtest validation:** walk-forward splits with embargo and purging, the
   deflated Sharpe ratio fed by the registry's trial count, a look-ahead leak
   detector, and holdout runs that require a pre-registered design.

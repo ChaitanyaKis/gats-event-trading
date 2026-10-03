@@ -8,6 +8,7 @@ that can return a row the system could not have known at ``as_of``.
 
 from __future__ import annotations
 
+from collections.abc import Collection
 from datetime import date, datetime, time
 from typing import Any
 
@@ -19,6 +20,7 @@ from gats.db.schema import (
     announcement_security,
     announcements,
     eod_prices,
+    extractions,
     index_eod,
     price_bands,
     surveillance_versions,
@@ -208,6 +210,69 @@ class AsOf:
             "trade_for_trade": bool(series) and series <= TRADE_FOR_TRADE_SERIES,
             "band_date": latest,
         }
+
+    def restrictions_on(self, symbol: str, day: date) -> frozenset[str] | None:
+        """ASM, GSM and trade-for-trade (T2T) status of ``symbol`` on ``day``;
+        None when the recorded history does not reach back to that day (it
+        starts when recording did), so "unknown" is never read as "clear"."""
+        symbol = symbol.upper()
+        s = surveillance_versions
+        first = self._conn.execute(
+            select(func.min(s.c.valid_from)).where(s.c.available_at <= self._as_of)
+        ).scalar()
+        if first is None or day < first:
+            return None
+        flags = {
+            "GSM" if row.list_name == "GSM" else "ASM"
+            for row in self._conn.execute(
+                select(s.c.list_name).where(
+                    s.c.symbol == symbol,
+                    s.c.valid_from <= day,
+                    (s.c.valid_to.is_(None)) | (s.c.valid_to > day),
+                    s.c.available_at <= self._as_of,
+                )
+            )
+        }
+        latest = self._conn.execute(
+            select(func.max(price_bands.c.as_of_date)).where(
+                price_bands.c.symbol == symbol,
+                price_bands.c.as_of_date <= day,
+                price_bands.c.available_at <= self._as_of,
+            )
+        ).scalar()
+        if latest is not None:
+            series = set(
+                self._conn.execute(
+                    select(price_bands.c.series).where(
+                        price_bands.c.symbol == symbol, price_bands.c.as_of_date == latest
+                    )
+                ).scalars()
+            )
+            if series and series <= TRADE_FOR_TRADE_SERIES:
+                flags.add("T2T")
+        return frozenset(flags)
+
+    def extracted_facts(
+        self, announcement_ids: Collection[int], version_prefix: str
+    ) -> dict[int, dict[str, Any]]:
+        """Facts extracted from each filing's own text, from its newest
+        extraction whose version starts with ``version_prefix``. They are
+        functions of the filing alone, so they were knowable when it was."""
+        facts: dict[int, dict[str, Any]] = {}
+        wanted = set(announcement_ids)
+        rows = self._conn.execute(
+            select(extractions.c.announcement_id, extractions.c.fields)
+            .join(announcements, announcements.c.id == extractions.c.announcement_id)
+            .where(
+                extractions.c.extractor_version.startswith(version_prefix, autoescape=True),
+                announcements.c.available_at <= self._as_of,
+            )
+            .order_by(extractions.c.created_at)
+        )
+        for announcement_id, fields in rows:
+            if announcement_id in wanted and fields:
+                facts[announcement_id] = dict(fields)
+        return facts
 
     def resolver(self) -> Resolver:
         """The security master's identifier lookup (built once per clock)."""

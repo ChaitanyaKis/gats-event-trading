@@ -110,6 +110,7 @@ del .env                             # back to real endpoints
 | `gats extract fetch --type ORDER_WIN` / `gats extract texts` / `gats extract coverage` | Download an event type's attachments (whatever the storage policy) and turn them into text |
 | `gats label sample` / `prepare` / `review` / `stats` | The labelled evaluation set: draw the held-out sample once, let the LLM answer in advance, check proposals against filings (see `labels/README.md`) |
 | `gats extract run --type ORDER_WIN --mode cascade [--limit N]` | Extract order value, counterparty, duration... (`rules`, `llm` or `cascade`; LLM modes need Ollama running) |
+| `gats backtest run --start D --end D [--holdout --prereg FILE]` | Backtest a strategy over stored events and bars; writes the G2 report |
 | `gats experiments list [--kind backtest]` | Research runs on record (logged before they start) and the number of distinct designs tried |
 | `gats inspect-bad [--limit N]` | Recent failed fetches and the payloads that failed to parse |
 | `gats version` | Installed version (check it after every update) |

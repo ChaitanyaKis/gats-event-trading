@@ -1782,3 +1782,134 @@ def experiments_list(
         shown = {k: metrics[k] for k in ("events", "trades", "net_pnl", "sharpe") if k in metrics}
         if shown or row.error:
             typer.echo(f"     {shown if shown else ''}{' ' + row.error if row.error else ''}")
+
+
+backtest_app = typer.Typer(no_args_is_help=True, help="Backtests (M6).")
+app.add_typer(backtest_app, name="backtest")
+
+
+def _load_strategy(path: Path) -> Any:
+    import yaml
+
+    from gats.strategy.order_win import OrderWinDrift
+
+    known = {OrderWinDrift.name: OrderWinDrift}
+    name = (yaml.safe_load(path.read_text(encoding="utf-8")) or {}).get("strategy")
+    if name not in known:
+        typer.echo(f"{path}: unknown strategy {name!r} (known: {', '.join(sorted(known))})")
+        raise typer.Exit(1)
+    return known[name].from_yaml(path)
+
+
+@backtest_app.command("run")
+def backtest_run(
+    start: Annotated[str, typer.Option(help="First filing day, YYYY-MM-DD.")],
+    end: Annotated[str, typer.Option(help="Last filing day, YYYY-MM-DD.")],
+    strategy_path: Annotated[Path, typer.Option("--strategy", help="Strategy YAML.")] = Path(
+        "configs/strategies/order_win_drift.yaml"
+    ),
+    types: EventTypes = None,
+    cash: Annotated[float, typer.Option(help="Starting cash, rupees.")] = 1_000_000.0,
+    # The risk engine sizes an order at its worst-case (limit) price, so the
+    # default stays well inside the 10%-of-equity position cap.
+    notional: Annotated[float, typer.Option(help="Rupees per trade.")] = 50_000.0,
+    latency_s: Annotated[float, typer.Option(help="Decision to market, seconds.")] = 5.0,
+    holdout: Annotated[bool, typer.Option(help="This run reads the test period.")] = False,
+    prereg: Annotated[
+        Path | None, typer.Option(help="Pre-registration recording the design hash.")
+    ] = None,
+    report: Annotated[Path, typer.Option(help="Where to write the report.")] = Path(
+        "reports/M6_backtest.md"
+    ),
+) -> None:
+    """Run a registered backtest over stored events and bars and write the G2 report."""
+    from gats.backtest import feed
+    from gats.backtest.costs import CostModel
+    from gats.backtest.engine import EngineConfig
+    from gats.backtest.ledger import daily_returns
+    from gats.backtest.report import g2_checks, g2_verdict, render
+    from gats.backtest.runner import HoldoutError, design, run_backtest
+    from gats.backtest.validation import deflated_sharpe, registry_trials
+    from gats.risk.engine import RiskEngine
+
+    settings = _settings()
+    strategy = _load_strategy(strategy_path)
+    costs = CostModel.load(Path("configs/costs/india_equity.yaml"))
+    config = EngineConfig(initial_cash=cash, notional_per_trade=notional, latency_s=latency_s)
+    windows, dropped = _windows(settings, types, start, end)
+    first, last = _parse_day(start), _parse_day(end)
+    db = make_engine(settings.resolved_db_url)
+    init_db(db)
+    with db.begin() as conn:
+        clock = AsOf(conn, utcnow())
+        lookups = feed.Lookups(clock, windows)
+        base = RiskEngine.load(Path("configs/risk.yaml"))
+        # Surveillance history starts when recording did; a backtest of
+        # earlier days cannot know it, and says so in its design.
+        limits = base.limits.model_copy(update={"unknown_flags": "allow"})
+        risk = RiskEngine(
+            limits,
+            f"{base.version}+unknown-flags-allow",
+            liquidity=lookups.liquidity,
+            flags=lookups.flags,
+        )
+        facts = clock.extracted_facts([w.announcement_id for w in windows], "cascade:")
+        bars = feed.bar_events(settings.bars_dir, windows)
+        sessions = clock.calendar().trading_days(first, last, include_special=False)
+        typer.echo(
+            f"{len(windows)} events (dropped: {dict(dropped)}), {len(facts)} with extracted "
+            f"facts, {len(bars):,} bars; design {design(strategy, costs, config, risk.version)[0]}"
+        )
+        if not bars:
+            typer.echo("no bars stored for these events: run `gats bars events` first")
+            raise typer.Exit(1)
+        try:
+            result, metrics, run_id = run_backtest(
+                db,
+                strategy,
+                [*feed.market_events(windows, facts), *bars],
+                costs=costs,
+                config=config,
+                data_start=first,
+                data_end=last,
+                holdout=holdout,
+                risk=risk,
+                risk_version=risk.version,
+                sessions=sessions,
+                prereg=prereg,
+            )
+        except HoldoutError as exc:
+            typer.echo(f"REFUSED: {exc}")
+            raise typer.Exit(1) from exc
+    with db.begin() as conn:
+        trials, variance = registry_trials(conn)
+    db.dispose()
+    returns = daily_returns(result.equity, result.initial_cash, sessions)
+    deflated = (
+        deflated_sharpe(returns, trial_variance=variance or 0.0, trials=trials)
+        if trials <= 1 or variance is not None
+        else None  # several designs but no spread of Sharpe ratios to deflate with
+    )
+    checks = g2_checks(
+        metrics,
+        holdout=holdout,
+        deflated_sharpe=deflated,
+        trials=trials,
+        max_drawdown_limit=limits.max_drawdown_pct_equity,
+    )
+    report.parent.mkdir(parents=True, exist_ok=True)
+    report.write_text(
+        render(
+            run_id=run_id,
+            design=design(strategy, costs, config, risk.version)[1],
+            window=f"{first} to {last}",
+            metrics=metrics,
+            checks=checks,
+        ),
+        encoding="utf-8",
+        newline="\n",
+    )
+    typer.echo(
+        f"experiment #{run_id}: {metrics.trades} trades, net Rs {metrics.net_pnl:,.2f}; "
+        f"G2: {g2_verdict(checks)} -> {report}"
+    )
