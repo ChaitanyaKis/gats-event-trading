@@ -70,6 +70,7 @@ def test_build_jobs_respects_flags(svc: Services) -> None:
     assert names == {
         "bse_announcements",
         "nse_announcements",
+        "hand_off",
         "nse_eod",
         "nse_indices",
         "nse_bands",

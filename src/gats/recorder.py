@@ -13,16 +13,19 @@ import json
 import logging
 import os
 import tempfile
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
 from typing import Any, Protocol
 
+from sqlalchemy import and_, select
+
 from gats import ingest
 from gats.db import repo
 from gats.db.repo import IngestMode
-from gats.extract.texts import extract_pending
+from gats.db.schema import announcement_event_types, announcements
+from gats.extract.texts import ExtractStats, extract_pending
 from gats.ingest import Outcome, Services
 from gats.logging_setup import kv
 from gats.refdata import dedupe, master, versions
@@ -48,6 +51,9 @@ log = logging.getLogger(__name__)
 
 
 class Job(Protocol):
+    """A job may also carry ``wake``, an :class:`asyncio.Event` that ends
+    its sleep early (see :class:`HandOffJob`)."""
+
     name: str
 
     def interval_s(self, now: datetime) -> float: ...
@@ -72,6 +78,7 @@ class _PollingAnnouncementsJob:
     night_multiplier: float
     night_start: time
     night_end: time
+    notify: asyncio.Event | None = field(default=None, kw_only=True)  # set on new filings
     _caught_up: bool = field(default=False, init=False)
 
     def interval_s(self, now: datetime) -> float:
@@ -85,6 +92,8 @@ class _PollingAnnouncementsJob:
     def _mark(self, outcome: Outcome) -> Outcome:
         if outcome.ok:
             self._caught_up = True
+        if outcome.n_new and self.notify is not None:
+            self.notify.set()
         return outcome
 
     @staticmethod
@@ -353,6 +362,135 @@ class AttachmentsJob:
 
 
 @dataclass
+class HandOffJob:
+    """The fast lane from a new filing to something a strategy can act on.
+
+    The batch jobs (classify, link, attachments, extract) each wake on
+    their own timer. That suits research and costs minutes, which an
+    intraday strategy does not have. This job is woken the moment an
+    announcements job stores new filings, and takes just those filings
+    through the same steps at once: type them, link them, and for the event
+    types a strategy trades, fetch the attachment ahead of the queue and
+    read its text.
+
+    It calls only what the batch jobs call, on rows they would reach
+    anyway, so whichever gets to a filing first the result is the same. The
+    recorder stays the only process that talks to the exchanges; a runtime
+    reads the outcome from the database.
+    """
+
+    name: str
+    fallback_s: float
+    path: Path
+    event_types: frozenset[str]
+    sources: frozenset[str]
+    max_age_s: float
+    max_downloads: int
+    wake: asyncio.Event = field(default_factory=asyncio.Event)
+    _taxonomy: Taxonomy | None = field(default=None, init=False)
+    _mtime: float | None = field(default=None, init=False)
+    _resolver: master.Resolver | None = field(default=None, init=False)
+    _build_id: int | None = field(default=None, init=False)
+    _cursor: int = field(default=-1, init=False)  # highest filing id taken so far
+    _retry: set[int] = field(default_factory=set, init=False)  # attachments still to get
+
+    def interval_s(self, now: datetime) -> float:
+        return self.fallback_s
+
+    async def run_once(self, svc: Services) -> Outcome:
+        self.wake.clear()  # filings stored from here on wake the job again
+        if not self.path.exists():
+            return Outcome(ok=False, error=f"taxonomy file not found: {self.path.resolve()}")
+        mtime = self.path.stat().st_mtime
+        if self._taxonomy is None or mtime != self._mtime:
+            self._taxonomy, self._mtime = Taxonomy.load(self.path), mtime
+        taxonomy = self._taxonomy
+        now = svc.clock()
+        cutoff = now - timedelta(seconds=self.max_age_s)
+        a, et = announcements, announcement_event_types
+        with svc.engine.begin() as conn:
+            fresh = [
+                int(i)
+                for i in conn.execute(
+                    select(a.c.id)
+                    .where(
+                        a.c.id > self._cursor,
+                        a.c.available_at >= cutoff,
+                        a.c.ingest_mode != "backfill",
+                    )
+                    .order_by(a.c.id)
+                ).scalars()
+            ]
+            for chunk in _chunked(fresh):
+                classify_pending(conn, taxonomy, now, ids=chunk)
+            build_id = master.latest_build_id(conn)
+            if build_id is not None:
+                if build_id != self._build_id or self._resolver is None:
+                    self._resolver = master.Resolver.load(conn, build_id)
+                    self._build_id = build_id
+                for chunk in _chunked(fresh):
+                    link_pending(conn, now, self._resolver, ids=chunk)
+            wanted = [
+                int(i)
+                for chunk in _chunked(sorted(self._retry | set(fresh)))
+                for i in conn.execute(
+                    select(a.c.id)
+                    .select_from(
+                        a.join(
+                            et,
+                            and_(
+                                et.c.announcement_id == a.c.id,
+                                et.c.taxonomy_version == taxonomy.version,
+                            ),
+                        )
+                    )
+                    .where(
+                        a.c.id.in_(chunk),
+                        et.c.event_type.in_(self.event_types),
+                        a.c.source.in_(self.sources),
+                        a.c.available_at >= cutoff,
+                    )
+                ).scalars()
+            ]
+        if fresh:
+            self._cursor = fresh[-1]
+        fetched = await ingest.fetch_attachments_for(
+            svc, wanted, job=self.name, limit=self.max_downloads
+        )
+        texts = ExtractStats()
+        with svc.engine.begin() as conn:
+            rows = conn.execute(
+                select(
+                    a.c.id, a.c.attachment_status, a.c.attachment_attempts, a.c.attachment_doc_id
+                ).where(a.c.id.in_(wanted))
+            ).all()
+            docs = [str(row.attachment_doc_id) for row in rows if row.attachment_doc_id]
+            if docs:
+                texts = extract_pending(conn, svc.store, svc.clock(), doc_ids=docs)
+        self._retry = {
+            int(row.id)
+            for row in rows
+            if row.attachment_status in ("pending", "failed", "skipped")
+            and row.attachment_attempts < svc.settings.attachments_max_attempts
+        }
+        return Outcome(
+            ok=True,
+            n_records=len(fresh),
+            n_new=fetched.n_new,
+            meta={
+                "in_scope": len(wanted),
+                "attachments": fetched.n_new,
+                "texts": texts.with_text,
+                "retrying": len(self._retry),
+            },
+        )
+
+
+def _chunked(ids: Sequence[int], size: int = 500) -> list[Sequence[int]]:
+    return [ids[i : i + size] for i in range(0, len(ids), size)]
+
+
+@dataclass
 class ReconcileJob:
     """Re-collect each of the last ``days`` days in full until it is complete.
 
@@ -403,6 +541,21 @@ class ReconcileJob:
 def build_jobs(svc: Services) -> list[Job]:
     s = svc.settings
     jobs: list[Job] = []
+    # The hand-off needs typed, linked filings and their attachments.
+    hand_off = (
+        HandOffJob(
+            "hand_off",
+            s.handoff_fallback_s,
+            s.taxonomy_path,
+            frozenset(s.handoff_event_types),
+            frozenset(s.handoff_sources),
+            s.handoff_max_age_s,
+            s.handoff_max_downloads,
+        )
+        if s.handoff_enabled and s.refdata_enabled and s.attachments_enabled
+        else None
+    )
+    new_filings = hand_off.wake if hand_off else None
     if s.bse_enabled:
         jobs.append(
             BseAnnouncementsJob(
@@ -413,6 +566,7 @@ def build_jobs(svc: Services) -> list[Job]:
                 s.night_end_ist,
                 max_pages=s.bse_max_pages,
                 catchup_max_pages=s.bse_catchup_max_pages,
+                notify=new_filings,
             )
         )
     if s.nse_enabled:
@@ -423,8 +577,11 @@ def build_jobs(svc: Services) -> list[Job]:
                 s.night_poll_multiplier,
                 s.night_start_ist,
                 s.night_end_ist,
+                notify=new_filings,
             )
         )
+    if hand_off is not None:
+        jobs.append(hand_off)
     if s.eod_enabled:
         jobs.append(
             EodJob(
@@ -543,9 +700,20 @@ class Heartbeat:
             raise
 
 
-async def _sleep_or_stop(stop: asyncio.Event, seconds: float) -> None:
-    with contextlib.suppress(TimeoutError):
-        await asyncio.wait_for(stop.wait(), timeout=seconds)
+async def _sleep_or_stop(
+    stop: asyncio.Event, seconds: float, wake: asyncio.Event | None = None
+) -> None:
+    """Sleep ``seconds``; less if the recorder stops or the job is woken."""
+    if wake is None:
+        with contextlib.suppress(TimeoutError):
+            await asyncio.wait_for(stop.wait(), timeout=seconds)
+        return
+    waits = [asyncio.ensure_future(stop.wait()), asyncio.ensure_future(wake.wait())]
+    try:
+        await asyncio.wait(waits, timeout=seconds, return_when=asyncio.FIRST_COMPLETED)
+    finally:
+        for waiting in waits:
+            waiting.cancel()
 
 
 async def run_job_loop(
@@ -586,7 +754,7 @@ async def run_job_loop(
             )
             log.warning("job failed %s", kv(job=job.name, failures=failures, error=outcome.error))
             delay = min(max_backoff_s, job.interval_s(svc.clock()) * (2 ** min(failures, 10)))
-        await _sleep_or_stop(stop, delay)
+        await _sleep_or_stop(stop, delay, getattr(job, "wake", None))
 
 
 async def run_recorder(svc: Services, stop: asyncio.Event, jobs: list[Job] | None = None) -> None:

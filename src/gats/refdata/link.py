@@ -16,12 +16,12 @@ not price information.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import Connection, and_, or_, select
+from sqlalchemy import Connection, and_, or_, select, true
 
 from gats.db import repo
 from gats.db.schema import announcement_security, announcements, securities
@@ -60,11 +60,15 @@ def link_one(row: Any, resolver: Resolver) -> tuple[int | None, str | None]:
     return None, None
 
 
-def _pending(conn: Connection, build_id: int, limit: int) -> Sequence[Any]:
+def _pending(
+    conn: Connection, build_id: int, limit: int, ids: Collection[int] | None
+) -> Sequence[Any]:
     """Unlinked filings, unresolved ones from older builds, and links to
-    securities that a later build merged into another."""
+    securities that a later build merged into another (among ``ids`` only,
+    if given)."""
     merged = select(securities.c.security_id).where(securities.c.merged_into.is_not(None))
     link = announcement_security
+    only = true() if ids is None else announcements.c.id.in_(list(ids))
     return conn.execute(
         select(
             announcements.c.id,
@@ -81,7 +85,8 @@ def _pending(conn: Connection, build_id: int, limit: int) -> Sequence[Any]:
                 link.c.announcement_id.is_(None),
                 and_(link.c.security_id.is_(None), link.c.build_id < build_id),
                 link.c.security_id.in_(merged),
-            )
+            ),
+            only,
         )
         .order_by(announcements.c.id)
         .limit(limit)
@@ -89,15 +94,21 @@ def _pending(conn: Connection, build_id: int, limit: int) -> Sequence[Any]:
 
 
 def link_pending(
-    conn: Connection, now: datetime, resolver: Resolver | None = None, *, max_rows: int = 10**7
+    conn: Connection,
+    now: datetime,
+    resolver: Resolver | None = None,
+    *,
+    max_rows: int = 10**7,
+    ids: Collection[int] | None = None,
 ) -> LinkStats:
-    """Link everything that needs it, against the latest master build."""
+    """Link everything that needs it (or only ``ids``), against the latest
+    master build."""
     stats = LinkStats(build_id=latest_build_id(conn))
     if stats.build_id is None:
         return stats  # no master yet: nothing to link against
     resolver = resolver or Resolver.load(conn, stats.build_id)
     while stats.considered < max_rows:
-        rows = _pending(conn, stats.build_id, min(_BATCH, max_rows - stats.considered))
+        rows = _pending(conn, stats.build_id, min(_BATCH, max_rows - stats.considered), ids)
         if not rows:
             break
         out = []

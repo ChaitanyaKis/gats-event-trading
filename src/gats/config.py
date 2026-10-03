@@ -205,6 +205,15 @@ class Settings(BaseSettings):
     # Event taxonomy (versioned YAML, relative to the working directory).
     taxonomy_path: Path = Path("configs/event_taxonomy.yaml")
     classify_poll_s: float = Field(default=120.0, gt=0)
+    # Hand-off (M7): the moment new filings are stored they are typed and
+    # linked, and those a strategy trades get their attachment fetched and
+    # read ahead of the batch queue. The timer is only a fallback.
+    handoff_enabled: bool = True
+    handoff_event_types: list[str] = Field(default_factory=lambda: ["ORDER_WIN"])
+    handoff_sources: list[str] = Field(default_factory=lambda: ["NSE"])
+    handoff_fallback_s: float = Field(default=30.0, gt=0)
+    handoff_max_age_s: float = Field(default=3600.0, gt=0)  # older filings: the batch jobs
+    handoff_max_downloads: int = Field(default=10, ge=1)  # attachments per run
     # Cross-exchange grouping of recent filings (rules: gats.refdata.dedupe).
     dedupe_poll_s: float = Field(default=300.0, gt=0)
     dedupe_lookback_days: int = Field(default=2, ge=1)

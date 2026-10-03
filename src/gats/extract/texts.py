@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Collection
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import Connection, and_, func, select
+from sqlalchemy import Connection, and_, func, select, true
 
 from gats.db import repo
 from gats.db.schema import (
@@ -31,11 +32,18 @@ class ExtractStats:
 
 
 def extract_pending(
-    conn: Connection, store: RawStore, now: datetime, *, limit: int = 10**7
+    conn: Connection,
+    store: RawStore,
+    now: datetime,
+    *,
+    limit: int = 10**7,
+    doc_ids: Collection[str] | None = None,
 ) -> ExtractStats:
-    """Extract every attachment not yet extracted by this extractor version."""
+    """Extract every attachment (or only ``doc_ids``) not yet extracted by
+    this extractor version."""
     stats = ExtractStats()
     t = document_texts
+    only = true() if doc_ids is None else raw_documents.c.doc_id.in_(list(doc_ids))
     while stats.documents < limit:
         docs = (
             conn.execute(
@@ -50,7 +58,7 @@ def extract_pending(
                         ),
                     )
                 )
-                .where(raw_documents.c.kind == "attachment", t.c.doc_id.is_(None))
+                .where(raw_documents.c.kind == "attachment", t.c.doc_id.is_(None), only)
                 .limit(min(_BATCH, limit - stats.documents))
             )
             .scalars()

@@ -13,7 +13,7 @@ from __future__ import annotations
 import hashlib
 import re
 from collections import Counter
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -21,7 +21,7 @@ from typing import Any
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator
-from sqlalchemy import Connection, and_, func, select
+from sqlalchemy import Connection, and_, func, select, true
 
 from gats.db import repo
 from gats.db.schema import announcement_event_types, announcements
@@ -235,11 +235,18 @@ class ClassifyStats:
 
 
 def classify_pending(
-    conn: Connection, taxonomy: Taxonomy, now: datetime, *, max_rows: int = 10**8
+    conn: Connection,
+    taxonomy: Taxonomy,
+    now: datetime,
+    *,
+    max_rows: int = 10**8,
+    ids: Collection[int] | None = None,
 ) -> ClassifyStats:
-    """Type every filing not yet typed under this taxonomy version."""
+    """Type every filing (or only ``ids``) not yet typed under this
+    taxonomy version."""
     stats = ClassifyStats(taxonomy.version)
     done = announcement_event_types
+    only = true() if ids is None else announcements.c.id.in_(list(ids))
     while stats.classified < max_rows:
         rows = conn.execute(
             select(
@@ -262,7 +269,7 @@ def classify_pending(
                     ),
                 )
             )
-            .where(done.c.announcement_id.is_(None))
+            .where(done.c.announcement_id.is_(None), only)
             .order_by(announcements.c.id)
             .limit(min(_BATCH, max_rows - stats.classified))
         ).all()
