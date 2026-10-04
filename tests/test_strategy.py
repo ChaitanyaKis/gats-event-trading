@@ -100,6 +100,15 @@ class TestEntries:
     def test_after_hours_filing_is_for_the_next_open(self, strategy: OrderWinDrift) -> None:
         assert len(strategy.on_event(order_win(at(18, 0)), StaticContext(at(18, 0)))) == 1
 
+    def test_a_clock_time_means_nothing_on_a_day_without_a_session(
+        self, strategy: OrderWinDrift
+    ) -> None:
+        late = order_win(at(15, 5))  # after the entry cutoff, if today were a session
+        assert strategy.on_event(late, StaticContext(at(15, 5))) == []
+        holiday = StaticContext(at(15, 5), trading_day=False)
+        (signal,) = strategy.on_event(late, holiday)  # a Saturday: it is for the next open
+        assert signal.side == "buy"
+
     def test_other_events_and_held_stocks(self, strategy: OrderWinDrift) -> None:
         other = MarketEvent(2, 7, KEY, "RESULTS", at(11, 0), {"amount_vs_revenue": 1.0})
         assert strategy.on_event(other, StaticContext(at(11, 0))) == []

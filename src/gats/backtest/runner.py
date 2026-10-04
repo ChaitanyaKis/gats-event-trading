@@ -19,7 +19,14 @@ from typing import Any
 from sqlalchemy import Engine as Database
 
 from gats.backtest.costs import CostModel
-from gats.backtest.engine import BacktestResult, CircuitLimits, Engine, EngineConfig, RiskGate
+from gats.backtest.engine import (
+    BacktestResult,
+    CircuitLimits,
+    Engine,
+    EngineConfig,
+    IsSession,
+    RiskGate,
+)
 from gats.backtest.ledger import Metrics, summarize
 from gats.research.registry import experiment
 from gats.strategy.base import BarEvent, MarketEvent, Strategy
@@ -75,6 +82,7 @@ def run_backtest(
     risk: RiskGate | None = None,
     risk_version: str = "none",
     circuit_limits: CircuitLimits | None = None,
+    is_session: IsSession | None = None,
     sessions: Sequence[date] | None = None,
     prereg: Path | None = None,
     root: Path = Path(),
@@ -96,7 +104,14 @@ def run_backtest(
         holdout=holdout,
         root=root,
     ) as run:
-        engine = Engine(strategy, costs, config, risk=risk, circuit_limits=circuit_limits)
+        engine = Engine(
+            strategy,
+            costs,
+            config,
+            risk=risk,
+            circuit_limits=circuit_limits,
+            is_session=is_session,
+        )
         result = engine.run(items)
         metrics = summarize(result, participation=config.participation, sessions=sessions)
         run.metrics = asdict(metrics)

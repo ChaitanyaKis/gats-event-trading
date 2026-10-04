@@ -14,10 +14,10 @@ journal rebuilds the account exactly. That gives:
   replay must reproduce them; if changed code would decide differently now,
   the run refuses to resume instead of quietly rewriting its history.
 
-The risk rules ask about things outside the journal (liquidity, surveillance
-lists, the kill switch). :class:`Tape` writes each answer next to the step
-that asked, and a replay is answered from the tape, so it never depends on
-today's database or file system.
+The engine asks about things outside the journal (liquidity, surveillance
+lists, the kill switch, whether a day has a session). :class:`Tape` writes
+each answer next to the step that asked, and a replay is answered from the
+tape, so it never depends on today's database or file system.
 
 A step and what it caused are stored in one transaction. Paper trading has
 no effect outside the database, so "the step happened if and only if its
@@ -150,6 +150,8 @@ class World(Protocol):
 
     def halted(self) -> bool: ...
 
+    def session(self, day: date) -> bool: ...
+
 
 class Tape:
     """Answers the risk rules: from the world when live, writing each answer
@@ -182,6 +184,11 @@ class Tape:
 
     def halted(self) -> bool:
         return bool(self._ask("halted", lambda world: world.halted()))
+
+    def session(self, day: date) -> bool:
+        """Does ``day`` have a regular session? Asked once a day; holiday
+        lists get corrected, so the answer of the time is kept."""
+        return bool(self._ask(f"session|{day.isoformat()}", lambda world: world.session(day)))
 
     def _ask(self, question: str, live: Callable[[World], Any]) -> Any:
         if question in self.answers:  # a step is one instant: one answer per question

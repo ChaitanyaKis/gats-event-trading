@@ -55,6 +55,9 @@ class FakeWorld:
     def halted(self) -> bool:
         return self.kill
 
+    def session(self, day: Any) -> bool:
+        return True
+
 
 def plan(quantity: int = 10) -> Scripted:
     return Scripted(
@@ -71,7 +74,9 @@ def builder(strategy: Strategy) -> Build:  # type: ignore[type-arg]
             LIMITS, "test", liquidity=tape.liquidity, flags=tape.flags, halted=tape.halted
         )
         config = EngineConfig(initial_cash=1_000_000.0, notional_per_trade=50_000.0)
-        return Engine(strategy, COSTS, config, risk=risk, listener=listener)
+        return Engine(
+            strategy, COSTS, config, risk=risk, listener=listener, is_session=tape.session
+        )
 
     return build
 
@@ -164,9 +169,11 @@ def test_every_step_is_journaled_with_what_it_caused(engine: Database) -> None:
     assert [row.seq for row in journal] == list(range(1, 22))
     assert [row.kind for row in journal] == ["bar"] * 20 + ["close"]
     assert journal[0].at == at(10, 1) + DELAY and journal[0].payload["close"] == 100
-    # Only the step that sent the entry asked the risk rules anything.
+    # Only the day's first step (which also sent the entry) asked anything.
     asked = {row.seq: sorted(row.answers) for row in journal if row.answers}
-    assert asked == {1: ["flags|" + A + "|2026-07-14", "halted", "liquidity|" + A + "|2026-07-14"]}
+    assert asked == {
+        1: [f"flags|{A}|2026-07-14", "halted", f"liquidity|{A}|2026-07-14", "session|2026-07-14"]
+    }  # the calendar once a day, the risk rules once per entry
     assert [(o.side, o.quantity, o.filled, o.status) for o in orders] == [
         ("buy", 10, 10, "filled"),
         ("sell", 10, 10, "filled"),
@@ -211,7 +218,8 @@ def test_a_replay_is_answered_from_the_tape_not_from_today(engine: Database) -> 
     assert (again.status, again.note) == (order.status, order.note)
     with engine.begin() as conn:
         answers = conn.execute(select(paper_journal.c.answers).where(paper_journal.c.seq == 1))
-        assert answers.scalar_one() == {"halted": True}  # refused before the other rules
+        # Refused at the kill switch, before the other risk rules were asked.
+        assert answers.scalar_one() == {"halted": True, "session|2026-07-14": True}
 
 
 def test_unknown_answers_are_recorded_as_unknown(engine: Database) -> None:

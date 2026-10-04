@@ -127,7 +127,14 @@ class System:
             flags=tape.flags,
             halted=tape.halted,
         )
-        return Engine(self.strategy, self.costs, self.config, risk=risk, listener=listener)
+        return Engine(
+            self.strategy,
+            self.costs,
+            self.config,
+            risk=risk,
+            listener=listener,
+            is_session=tape.session,
+        )
 
     @property
     def kill_switch(self) -> Path | None:
@@ -175,9 +182,16 @@ class LiveWorld:
     """The outside world at one moment: liquidity and surveillance through
     the point-in-time reader, the kill switch from the file system."""
 
-    def __init__(self, clock: AsOf, securities: Mapping[str, int], kill_switch: Path | None):
+    def __init__(
+        self,
+        clock: AsOf,
+        securities: Mapping[str, int],
+        kill_switch: Path | None,
+        calendar: TradingCalendar,
+    ) -> None:
         self._lookups = Lookups(clock, securities)
         self._kill_switch = kill_switch
+        self._calendar = calendar
 
     def liquidity(self, instrument_key: str, day: date) -> float | None:
         return self._lookups.liquidity(instrument_key, day)
@@ -187,6 +201,9 @@ class LiveWorld:
 
     def halted(self) -> bool:
         return self._kill_switch is not None and self._kill_switch.exists()
+
+    def session(self, day: date) -> bool:
+        return self._calendar.is_regular_session(day)
 
 
 @dataclass
@@ -346,7 +363,7 @@ class PaperRuntime:
         ]
         try:
             with svc.engine.begin() as conn:
-                world = LiveWorld(AsOf(conn, at), securities, self.system.kill_switch)
+                world = LiveWorld(AsOf(conn, at), securities, self.system.kill_switch, calendar)
                 for item in items:
                     applied = run.apply(conn, item, at, world)
                     report.orders += applied.orders

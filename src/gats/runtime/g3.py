@@ -102,7 +102,8 @@ def backtest_of(
     ).all()
     items = [decode(kind, payload) for kind, payload in rows]
     securities = {i.instrument_key: i.security_id for i in items if isinstance(i, MarketEvent)}
-    lookups = Lookups(AsOf(conn, now), securities)
+    clock = AsOf(conn, now)
+    lookups = Lookups(clock, securities)
     risk = RiskEngine(
         system.limits,
         system.risk_version,
@@ -111,7 +112,11 @@ def backtest_of(
         halted=lambda: False,  # a backtest has no kill switch
     )
     engine = Engine(
-        system.strategy, system.costs, replace(system.config, latency_s=latency_s), risk=risk
+        system.strategy,
+        system.costs,
+        replace(system.config, latency_s=latency_s),
+        risk=risk,
+        is_session=clock.calendar().is_regular_session,
     )
 
     def known(item: Any) -> tuple[datetime, int]:

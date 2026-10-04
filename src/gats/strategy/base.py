@@ -90,6 +90,12 @@ class Context(Protocol):
     @property
     def now(self) -> datetime: ...
 
+    @property
+    def trading_day(self) -> bool:
+        """Does today have a regular session? A clock time means nothing on
+        a weekend or a holiday: 11:00 on a Saturday is not "mid-session"."""
+        ...
+
     def position(self, instrument_key: str) -> Position | None: ...
 
     def positions(self) -> list[Position]: ...
@@ -151,6 +157,7 @@ class StaticContext:
     clock: datetime
     held: dict[str, Position] = field(default_factory=dict)
     working: dict[str, int] = field(default_factory=dict)
+    trading_day: bool = True
 
     @property
     def now(self) -> datetime:

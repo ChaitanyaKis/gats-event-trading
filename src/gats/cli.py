@@ -1938,6 +1938,7 @@ def backtest_run(
                 holdout=holdout,
                 risk=risk,
                 risk_version=risk.version,
+                is_session=clock.calendar().is_regular_session,
                 sessions=sessions,
                 prereg=prereg,
             )

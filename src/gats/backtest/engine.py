@@ -24,6 +24,10 @@ worse than none:
 - **Delivery is T+1**: shares bought today cannot be sold today, and sale
   proceeds become usable on the next trading day.
 - **No leverage**: every buy needs the cash for the shares and the charges.
+- **Days without a session.** Given a calendar (``is_session``), a weekend
+  or a holiday is not a trading day whatever the clock says: an order sent
+  then waits for the next open instead of expiring at a close that never
+  happened, and the risk rules do not treat it as mid-session.
 
 Long positions only (S1 is long-only).
 """
@@ -52,6 +56,7 @@ from gats.timeutil import to_ist
 
 OrderStatus = Literal["working", "filled", "expired", "rejected"]
 CircuitLimits = Callable[[str, date], tuple[float, float] | None]
+IsSession = Callable[[date], bool]  # does this day have a regular session?
 
 
 @dataclass(frozen=True)
@@ -139,6 +144,7 @@ class EngineState:
     last_data_at: dict[str, datetime] = field(default_factory=dict)
     day_start_equity: float = 0.0
     day: date | None = None
+    session: bool = True  # does ``day`` have a regular session?
 
 
 @dataclass
@@ -172,13 +178,17 @@ class Engine:
         risk: RiskGate | None = None,
         circuit_limits: CircuitLimits | None = None,
         listener: Listener | None = None,
+        is_session: IsSession | None = None,
     ) -> None:
+        """``is_session``: the trading calendar. Without one every day
+        counts as a session (fine for data that only has trading days)."""
         self.strategy = strategy
         self.costs = costs
         self.config = config
         self.risk = risk or AllowAll()
         self.circuit_limits = circuit_limits
         self.listener = listener
+        self.is_session = is_session
         self.state = EngineState(cash=config.initial_cash, day_start_equity=config.initial_cash)
         self.orders: list[Order] = []
         self.executions: list[Execution] = []
@@ -261,7 +271,7 @@ class Engine:
                 sign = 1 if order.signal.side == "buy" else -1
                 key = order.signal.instrument_key
                 working[key] = working.get(key, 0) + sign * order.remaining
-        return StaticContext(now, dict(self.state.positions), working)
+        return StaticContext(now, dict(self.state.positions), working, self.state.session)
 
     def _new_day(self, day: date) -> None:
         st = self.state
@@ -272,6 +282,7 @@ class Engine:
                 raise ValueError(f"an item of {day} after {st.day}: items must come in time order")
             self._end_of_day()
         st.day = day
+        st.session = True if self.is_session is None else bool(self.is_session(day))
         st.day_high.clear()
         st.day_low.clear()
         for usable_from, amount in list(st.unsettled):
@@ -309,7 +320,7 @@ class Engine:
             buying=buying,
             last_data_at=dict(st.last_data_at),
             orders_this_second=this_second,
-            in_session=_SESSION_OPEN <= to_ist(now).time() < _SESSION_CLOSE,
+            in_session=st.session and _SESSION_OPEN <= to_ist(now).time() < _SESSION_CLOSE,
         )
 
     def _end_of_day(self) -> None:
@@ -330,7 +341,9 @@ class Engine:
                 )
         close = self._close_time(st.day)
         for order in self.orders:
-            sent_today = order.submitted_at < close
+            # A day without a session has no close to expire at: its orders
+            # wait for the next open.
+            sent_today = st.session and order.submitted_at < close
             if order.status == "working" and order.signal.product == "intraday" and sent_today:
                 order.status, order.note = "expired", "end of day"
         self.equity[st.day] = self._equity()

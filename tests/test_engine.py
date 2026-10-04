@@ -402,3 +402,59 @@ def test_a_reference_price_stands_in_for_the_previous_session() -> None:
     assert buys(result)[0].at == at(9, 15, D2)
     with pytest.raises(ValueError, match="positive"):
         engine.reference(B, 0.0, at(15, 30, D1))
+
+
+def test_a_weekend_filing_is_bought_at_the_next_open_when_the_calendar_is_known() -> None:
+    """11:00 on a Saturday is not mid-session. With a calendar the order waits
+    for Monday's open; the risk rules do not treat it as mid-session either."""
+    friday, saturday, monday = date(2026, 7, 17), date(2026, 7, 18), date(2026, 7, 20)
+    event = MarketEvent(1, 1, A, "ORDER_WIN", at(11, 0, saturday))
+    plan = {1: [buy(when=at(11, 0, saturday))]}
+    items = [
+        *bars(A, at(15, 20, friday), flat(100, 10)),
+        event,
+        *bars(A, at(9, 15, monday), flat(101, 5)),
+    ]
+    in_session: list[bool] = []
+
+    class Watching:
+        def check(self, order: OrderIntent, account: Exposure) -> str | None:
+            in_session.append(account.in_session)
+            return None
+
+    config = EngineConfig(initial_cash=1_000_000.0, notional_per_trade=100_000.0)
+    engine = Engine(
+        Scripted(on_events=plan),
+        COSTS,
+        config,
+        risk=Watching(),
+        is_session=lambda day: day.weekday() < 5,
+    )
+    result = engine.run(items)
+    (order,) = result.orders
+    assert order.status == "filled" and buys(result)[0].at == at(9, 15, monday)
+    assert in_session == [False]
+
+    # Without a calendar every day counts as a session: the order "expires at
+    # the close" of a Saturday. That is why real runs pass the calendar.
+    blind = run(Scripted(on_events=plan), items)
+    assert (blind.orders[0].status, blind.orders[0].note) == ("expired", "end of day")
+    assert buys(blind) == []
+
+
+def test_an_after_hours_order_survives_a_weekend_with_a_calendar() -> None:
+    """Sent on Friday evening, with a filing for another stock on Saturday in
+    between: it must still be there for Monday's open."""
+    friday, saturday, monday = date(2026, 7, 17), date(2026, 7, 18), date(2026, 7, 20)
+    plan = {1: [buy(when=at(16, 0, friday))]}
+    items = [
+        *bars(A, at(15, 20, friday), flat(100, 10)),
+        MarketEvent(1, 1, A, "ORDER_WIN", at(16, 0, friday)),
+        MarketEvent(2, 2, B, "ORDER_WIN", at(11, 0, saturday)),  # nothing is done about it
+        *bars(A, at(9, 15, monday), flat(101, 5)),
+    ]
+    config = EngineConfig(initial_cash=1_000_000.0, notional_per_trade=100_000.0)
+    aware = Engine(
+        Scripted(on_events=plan), COSTS, config, is_session=lambda day: day.weekday() < 5
+    ).run(items)
+    assert aware.orders[0].status == "filled" and buys(aware)[0].at == at(9, 15, monday)

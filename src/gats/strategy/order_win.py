@@ -7,9 +7,9 @@ whether it has an edge is for the gates, and the parameters are fixed by a
 pre-registration before any backtest uses them.
 
 Timing: a filing during the session is acted on at once (until the entry
-cutoff); one outside market hours yields a signal the engine executes at the
-next open. A filing that reaches the strategy late (``max_signal_delay``)
-is skipped: its reaction is gone.
+cutoff); one outside market hours, or on a day without a session, yields a
+signal the engine executes at the next open. A filing that reaches the
+strategy late (``max_signal_delay``) is skipped: its reaction is gone.
 """
 
 from __future__ import annotations
@@ -60,8 +60,8 @@ class OrderWinDrift(Strategy[OrderWinParams]):
         if ratio is not None and float(ratio) < p.min_amount_vs_revenue:
             return []
         clock = to_ist(ctx.now).time()
-        if p.entry_cutoff_ist <= clock < _SESSION_CLOSE:
-            return []
+        if ctx.trading_day and p.entry_cutoff_ist <= clock < _SESSION_CLOSE:
+            return []  # too little of today's session left
         reason = f"{self.name}: order win #{event.event_id}"
         return [Signal(key, "buy", p.product, reason, ctx.now)]
 

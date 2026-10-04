@@ -266,6 +266,7 @@ async def test_a_full_session_with_a_restart_in_the_middle(
     assert all(r.payload["open"] != 777.0 and r.payload["volume"] == 10_000 for r in bars)
     assert all(r.at >= s + timedelta(minutes=1) + MARGIN for r, s in zip(bars, starts, strict=True))
     assert rows.index(event) == 45  # the filing came after the bars known by then
+    assert rows[0].answers == {"session|2024-04-02": True}  # the calendar, once a day
 
     # The trade: in at the first bar to start after the decision, out an hour later.
     with svc.engine.begin() as conn:
