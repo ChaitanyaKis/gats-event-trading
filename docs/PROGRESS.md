@@ -5,7 +5,7 @@ Claude Code updates this after every task. Newest log entry first.
 ## Status
 
 - **Version:** 0.2.0 · **Schema:** v11 · **Milestone:** M3 (M1 waits only on T1.6, HUMAN)
-- **Next up:** VERIFY FIRST (next session), then the open items below. M4 to M8 are code-complete; every real run waits on the human. Open code items, in order: (a) T7.1 acceptance: a full session over `scripts/mock_exchange.py` (the in-process full-session test passes; the mock exchange does not serve candles or PDFs yet); (b) a recorder job that keeps quarterly results fresh (today only `gats backfill results`; stale revenue makes paper differ from a later backtest); (c) filings on non-trading days are not traded by the engine in backtest or paper (decide before the G1b pre-registration); (d) learning notes M3 to M8; (e) `run_live` has only been tested in parts. Waiting on the human: recorder (1), M3 run (3), labels (5), Upstox token (6), items 8 to 12
+- **Next up:** Everything that can be built without the human is built and verified offline (744 tests, plus `scripts/paper_smoke.py`). What remains needs data, the human or a gate. When items arrive, in this order: token (6) -> probe candles, check costs against the broker's calculator, fetch bars; backfill (3) -> M3 run and G1, then results backfill (7); labels (5) -> T4.6 then T4.7; recorder latency (1) -> T5.3 and G1b; then G2; one real paper day (10) -> T7.2 latency budget [ASK]; two months of paper -> T7.5 and G3. To check at the M3 run: the share of unlinked events by year (survivorship). Waiting on the human: recorder (1), GitHub (2), M3 backfill (3), labels (5), Upstox token (6), results (7), items 8 to 12
 
 ## Waiting on the human (HUMAN)
 
@@ -147,7 +147,7 @@ are PowerShell, run from `C:\Projects\GATS`.
 - [ ] M4 LLM extraction (infrastructure for ORDER_WIN; scope confirmed at G1): T4.1 ✅ · T4.2 ✅ · T4.3 ✅ · T4.4 ✅ · T4.5 ⏳ (code ✅; labels: human) · T4.6 ⏳ (code ✅; needs the labels) · T4.7 ⏳ (pre-registered; code ✅; the run needs items 3, 5 and 7)
 - [ ] M5 Intraday data & reaction curves (G1b): T5.1 ⏳ (code ✅; token: human, item 6) · T5.2 ⏳ (code ✅; the fetch needs the token) · T5.3 ⏳ (pre-registered; code ✅; the run needs bars and recorder latency) · T5.4 ⏳ (gate)
 - [ ] M6 Backtester (G2): T6.1 ⏳ (model ✅; broker-calculator check needs the token, item 6) · T6.2 ✅ · T6.3 ✅ · T6.4 ✅ · T6.5 ✅ · T6.6 ✅ · T6.7 ✅ · T6.8 ⏳ (code ✅; the G2 run needs bars, events and T4.7's revenue feature)
-- [ ] M7 Paper trading (G3): T7.1 ⏳ (code ✅; mock-exchange session open; the real day: human, item 10) · T7.2 ⏳ [ASK] (measured by `gats paper status`; needs live data) · T7.3 ⏳ (code ✅; bot: human, item 9) · T7.4 ⏳ (scripts and docs ✅; VM: human, item 11) · T7.5 ⏳ (report code ✅; needs two months of paper)
+- [ ] M7 Paper trading (G3): T7.1 ⏳ (code ✅; full session over the mock exchange ✅; the real day: human, item 10) · T7.2 ⏳ [ASK] (measured by `gats paper status`; needs live data) · T7.3 ⏳ (code ✅; bot: human, item 9) · T7.4 ⏳ (scripts and docs ✅; VM: human, item 11) · T7.5 ⏳ (report code ✅; needs two months of paper)
 - [ ] M8 Live pilot (G4, human-only): T8.1 ✅ (off by default; order API documented, never called) · T8.2 ✅ · T8.3 ✅ · T8.4 ✅ · G4: the human's
 
 ## Tasks done
@@ -161,6 +161,22 @@ are PowerShell, run from `C:\Projects\GATS`.
 ## Log
 
 - **2026-10-04:**
+  - T7.1 loose ends closed. (1) A day without a session is not a trading day whatever the
+    clock says: the engine takes the calendar, an order sent on a Saturday or a holiday
+    waits for the next open, the risk rules do not call it mid-session, and the strategy
+    sees `ctx.trading_day`. Before, a weekend filing was traded or dropped depending on the
+    hour it was filed. In paper the calendar's answer is recorded on the tape. (2) A full
+    paper session over the mock exchange: `scripts/paper_smoke.py` (real HTTP on 127.0.0.1,
+    simulated clock, temporary directory, 8 s), kept runnable by a test. (3) A recorder job
+    keeps quarterly results current for companies with in-scope filings.
+  - Live loop tested end to end with a fake broker, which found two faults: a real sell
+    could exceed the real position (now capped at what real fills hold, so a refused or
+    unfilled entry can never turn its exit into a short), and a real order could outlive
+    its engine order (now cancelled). One disagreement with the broker's positions no
+    longer switches trading off; the same one twice in a row does. A failed tick no longer
+    ends a live run.
+  - Learning notes M3 to M6 (`docs/learning/`), written at code-complete; results are added
+    at each gate.
   - M8 code (T8.1 to T8.4), all off. Three locks with no bypass: `GATS_LIVE_ENABLED`
     (false), a human's approval row bound to the design hash, the caps hash and the hash
     of a G3 report that says PASS (`gats gate approve`: interactive terminal and a typed

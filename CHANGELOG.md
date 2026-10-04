@@ -3,6 +3,12 @@
 ## Unreleased
 Schema v11 (new tables only), upgraded automatically.
 
+- **Offline paper session:** `python scripts/paper_smoke.py` runs a whole
+  paper-trading day against the mock exchange in a few seconds.
+- **Weekend and holiday filings** are now carried to the next open in
+  backtests and paper trading, whatever hour they were filed at.
+- **Results stay current:** the recorder refreshes quarterly results for
+  companies with in-scope filings (settings `GATS_RESULTS_*`).
 - **Gate G3 report:** `gats paper report --name NAME` judges a paper run
   against a backtest of its own filings and bars, by criteria fixed in
   `configs/g3.yaml`, and writes `reports/M7_paper.md`.
