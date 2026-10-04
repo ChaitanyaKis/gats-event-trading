@@ -214,6 +214,18 @@ class Settings(BaseSettings):
     handoff_fallback_s: float = Field(default=30.0, gt=0)
     handoff_max_age_s: float = Field(default=3600.0, gt=0)  # older filings: the batch jobs
     handoff_max_downloads: int = Field(default=10, ge=1)  # attachments per run
+    # Results refresh (M7): keeps quarterly revenue current for the companies
+    # a strategy may trade, so "order value / trailing revenue" is not judged
+    # on last year's figures. A company is asked about when it files results,
+    # or when it has a fresh in-scope filing and no results stored at all.
+    results_enabled: bool = True
+    results_check_s: float = Field(default=1800.0, gt=0)
+    results_event_type: str = "RESULTS"
+    results_lookback_days: int = Field(default=3, ge=1)
+    results_max_symbols: int = Field(default=10, ge=1)  # per run: two requests each
+    results_max_xbrl: int = Field(default=20, ge=1)  # XBRL files read per run
+    results_retry_s: float = Field(default=21600.0, gt=0)  # before asking a company again
+    results_xbrl_since_days: int = Field(default=500, ge=90)  # quarters worth reading
     # Paper runtime (M7). The poll is of the local database, not of an
     # exchange. A candle is trusted once its minute ended `paper_bar_margin_s`
     # before the broker was asked (how soon a finished candle is published is

@@ -19,12 +19,12 @@ from datetime import date, datetime, time, timedelta
 from pathlib import Path
 from typing import Any, Protocol
 
-from sqlalchemy import and_, select
+from sqlalchemy import and_, func, select
 
 from gats import ingest
 from gats.db import repo
 from gats.db.repo import IngestMode
-from gats.db.schema import announcement_event_types, announcements
+from gats.db.schema import announcement_event_types, announcements, financial_results
 from gats.extract.texts import ExtractStats, extract_pending
 from gats.ingest import Outcome, Services
 from gats.logging_setup import kv
@@ -37,6 +37,7 @@ from gats.refdata.ingest import (
     ingest_nse_symbol_changes,
 )
 from gats.refdata.link import link_pending
+from gats.refdata.results import fetch_pending_xbrl, ingest_results_index
 from gats.research.taxonomy import Taxonomy, classify_pending
 from gats.sources import (
     bse_scrips,
@@ -491,6 +492,109 @@ def _chunked(ids: Sequence[int], size: int = 500) -> list[Sequence[int]]:
 
 
 @dataclass
+class ResultsJob:
+    """Keep quarterly results current for the companies a strategy may trade.
+
+    ``gats backfill results`` loads history once. Without this job the
+    figures then age: an order win in December would be sized against
+    revenue that stops in June, and a later backtest, run on a complete
+    database, would see a different ratio than paper trading did.
+
+    Two triggers, both read from filings the recorder already has:
+
+    - a company in the universe (it has had an in-scope filing before) files
+      its results: ask NSE's results index about it, then read the XBRL;
+    - a company has a fresh in-scope filing and no results stored at all:
+      ask too, so that its next filing can be sized.
+
+    A company is asked at most once per ``retry_s``: the results index can
+    lag the announcement by hours.
+    """
+
+    name: str
+    check_s: float
+    path: Path
+    results_type: str
+    in_scope: frozenset[str]
+    lookback_days: int
+    max_symbols: int
+    max_xbrl: int
+    retry_s: float
+    xbrl_since_days: int
+    _taxonomy: Taxonomy | None = field(default=None, init=False)
+    _mtime: float | None = field(default=None, init=False)
+    _asked: dict[str, datetime] = field(default_factory=dict, init=False)
+
+    def interval_s(self, now: datetime) -> float:
+        return self.check_s
+
+    def due(self, svc: Services, version: str) -> list[str]:
+        """Symbols to ask about now, most recently filed first."""
+        now = svc.clock()
+        since = now - timedelta(days=self.lookback_days)
+        a, et, f = announcements, announcement_event_types, financial_results
+        typed = a.join(et, and_(et.c.announcement_id == a.c.id, et.c.taxonomy_version == version))
+        nse = and_(a.c.source == "NSE", a.c.symbol.is_not(None))
+        with svc.engine.begin() as conn:
+            universe = set(
+                conn.execute(
+                    select(a.c.symbol)
+                    .select_from(typed)
+                    .where(nse, et.c.event_type.in_(self.in_scope))
+                    .distinct()
+                ).scalars()
+            )
+            stored = {
+                str(symbol): latest
+                for symbol, latest in conn.execute(
+                    select(f.c.symbol, func.max(f.c.available_at)).group_by(f.c.symbol)
+                )
+            }
+            recent = conn.execute(
+                select(a.c.symbol, et.c.event_type, func.max(a.c.available_at))
+                .select_from(typed)
+                .where(
+                    nse,
+                    a.c.available_at >= since,
+                    et.c.event_type.in_([self.results_type, *self.in_scope]),
+                )
+                .group_by(a.c.symbol, et.c.event_type)
+            ).all()
+        wanted: dict[str, datetime] = {}
+        for symbol, event_type, filed_at in recent:
+            have = stored.get(symbol)
+            reported = event_type == self.results_type and symbol in universe
+            behind = reported and (have is None or have < filed_at)  # newer than what is stored
+            unknown = event_type in self.in_scope and have is None
+            if behind or unknown:
+                wanted[symbol] = max(filed_at, wanted.get(symbol, filed_at))
+        retry = timedelta(seconds=self.retry_s)
+        waiting = [s for s in wanted if s not in self._asked or now - self._asked[s] >= retry]
+        return sorted(waiting, key=lambda s: wanted[s], reverse=True)[: self.max_symbols]
+
+    async def run_once(self, svc: Services) -> Outcome:
+        if not self.path.exists():
+            return Outcome(ok=False, error=f"taxonomy file not found: {self.path.resolve()}")
+        mtime = self.path.stat().st_mtime
+        if self._taxonomy is None or mtime != self._mtime:
+            self._taxonomy, self._mtime = Taxonomy.load(self.path), mtime
+        symbols = self.due(svc, self._taxonomy.version)
+        total = Outcome(ok=True, meta={"asked": symbols})
+        for symbol in symbols:
+            self._asked[symbol] = svc.clock()
+            outcome = await ingest_results_index(svc, symbol, job=self.name)
+            total.n_records += outcome.n_records
+            total.n_new += outcome.n_new
+            if not outcome.ok:
+                total.warnings.append(f"{symbol}: {outcome.error}")
+        if symbols:
+            since = ist_today(svc.clock()) - timedelta(days=self.xbrl_since_days)
+            stats = await fetch_pending_xbrl(svc, since=since, limit=self.max_xbrl, job=self.name)
+            total.meta["xbrl"] = {"read": stats.attempted, "done": stats.done}
+        return total
+
+
+@dataclass
 class ReconcileJob:
     """Re-collect each of the last ``days`` days in full until it is complete.
 
@@ -660,6 +764,21 @@ def build_jobs(svc: Services) -> list[Job]:
     if s.attachments_enabled:
         jobs.append(AttachmentsJob("attachments", s.attachments_poll_s))
         jobs.append(ExtractJob("extract", s.extract_poll_s))
+    if s.results_enabled and s.refdata_enabled and s.nse_enabled:
+        jobs.append(
+            ResultsJob(
+                "results",
+                s.results_check_s,
+                s.taxonomy_path,
+                s.results_event_type,
+                frozenset(s.handoff_event_types),
+                s.results_lookback_days,
+                s.results_max_symbols,
+                s.results_max_xbrl,
+                s.results_retry_s,
+                s.results_xbrl_since_days,
+            )
+        )
     sources = tuple(
         src for src, enabled in (("BSE", s.bse_enabled), ("NSE", s.nse_enabled)) if enabled
     )
