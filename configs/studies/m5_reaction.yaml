@@ -4,6 +4,10 @@
 # Pre-registered. The engine refuses to run unless this file's hash equals
 # the one recorded in the pre-registration; any change is a new study and a
 # new trial.
+#
+# Amended once, on 2026-10-04 (Amendment 1 in the pre-registration), after
+# gate G1 and before any one-minute bar was fetched: the scope and
+# `entry.confirmatory_strata`.
 
 study: m5-intraday-reaction
 taxonomy_version: taxonomy-v1+6f16e1c9
@@ -16,9 +20,9 @@ data:
   test_start: 2024-01-01           # the holdout: used once, for G1b
 
 events:
-  # M3's confirmatory types. The run's scope is the subset in scope after
-  # G1; it is fixed and logged before any bar-based return is computed.
-  confirmatory: [ORDER_WIN, RATING_UP, BUYBACK, BONUS_SPLIT, PRESS_RELEASE]
+  # The scope after G1 (Amendment 1): the original thesis, order wins. M3's
+  # other four types (RATING_UP, BUYBACK, BONUS_SPLIT, PRESS_RELEASE) are out.
+  confirmatory: [ORDER_WIN]
   exploratory: []
   exclude_categories: ["Daily Buy Back of equity shares", "Closure of Buy Back",
                        "Post Buyback Public Announcement"]
@@ -36,6 +40,11 @@ entry:
   order_allowance_s: 5
   cutoff_ist: "15:00"              # later decisions trade at the next session's open
   max_wait_minutes: 5              # the entry bar must start this soon after the earliest minute
+  # Amendment 1: only filings made during market hours can pass the gate
+  # (decided inside a regular session before the cutoff, so entered minutes
+  # after the filing). Filings entered at the next open are computed and
+  # reported, never eligible.
+  confirmatory_strata: [session]
 
 exits:                             # confirmatory; minutes after the entry bar's start
   - {name: m5, minutes: 5}
@@ -70,6 +79,6 @@ statistics:
   cluster: event_date
   bootstrap_resamples: 10000
   bootstrap_seed: 20261003
-  fdr: {method: benjamini-hochberg, q: 0.05, family: types in scope x confirmatory exits}
+  fdr: {method: benjamini-hochberg, q: 0.05, family: types in scope x confirmatory exits}   # 1 x 5
   ci: fcr_adjusted
   min_test_events: 100

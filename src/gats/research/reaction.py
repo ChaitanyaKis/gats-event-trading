@@ -41,7 +41,7 @@ from gats.research.study import (
     StatSpec,
     _Strict,
     config_hash,
-    registered_hash,
+    registered_hash_for,
 )
 from gats.sources.upstox import Bar
 from gats.timeutil import ist_datetime, to_ist
@@ -57,6 +57,9 @@ class EntryRule(_Strict):
     order_allowance_s: float = Field(ge=0)
     cutoff_ist: time
     max_wait_minutes: int = Field(ge=1)
+    # Which filings can pass the gate: "session" (decided inside a regular
+    # session before the cutoff) and/or "overnight" (entered at the next open).
+    confirmatory_strata: list[Literal["session", "overnight"]] = Field(min_length=1)
 
 
 class Horizon(_Strict):
@@ -110,7 +113,7 @@ class ReactionConfig(_Strict):
 
 def verify_reaction(config: Path, prereg: Path) -> tuple[ReactionConfig, str]:
     """Load the study only if the config is exactly the registered one."""
-    actual, expected = config_hash(config), registered_hash(prereg)
+    actual, expected = config_hash(config), registered_hash_for(prereg, config)
     if actual != expected:
         raise RegistrationError(
             f"{config} (sha256 {actual[:12]}...) is not the pre-registered config "
@@ -277,7 +280,42 @@ def react(
                 delivery=delivery,
             )
             row[f"{label}_{horizon.name}"] = abnormal - charge
+    if row["stratum"] == "session":
+        row |= _placebo(window, stock, index, cfg, entry_bar.ts, cal)
     return row
+
+
+def _placebo(
+    window: EventWindow,
+    stock: Sequence[Bar],
+    index: Sequence[Bar],
+    cfg: ReactionConfig,
+    entered: datetime,
+    cal: TradingCalendar,
+) -> dict[str, float]:
+    """The same windows one session earlier: same stock, same clock time, no
+    filing. Abnormal returns before costs (``placebo_<exit>``): the baseline
+    an event's returns are read against, because an ordinary stock is not
+    flat against the index within a day."""
+    before = window.sessions[0]
+    moment = ist_datetime(before, to_ist(entered).time())
+    ours, theirs = _same_day(stock, before), _same_day(index, before)
+    at, index_at = _at_or_after(ours, moment), _at_or_after(theirs, moment)
+    if at is None or index_at is None:
+        return {}
+    start = ours[at]
+    if start.ts >= moment + timedelta(minutes=cfg.entry.max_wait_minutes):
+        return {}
+    square_off = ist_datetime(before, cfg.square_off_ist)
+    found: dict[str, float] = {}
+    for horizon in cfg.exits:
+        prices = _exit_prices(horizon, start.ts, before, square_off, stock, index, cal)
+        if prices is not None:
+            stock_exit, index_exit = prices
+            found[f"placebo_{horizon.name}"] = (
+                stock_exit / start.open - 1 - (index_exit / theirs[index_at].open - 1)
+            )
+    return found
 
 
 def _exit_prices(

@@ -38,9 +38,11 @@ class GateView:
 def decide(
     rows: list[dict[str, Any]], cfg: ReactionConfig, scope: Sequence[str]
 ) -> tuple[dict[tuple[str, str, str], Cell], list[Cell]]:
-    """All confirmatory cells and the judged family (scope x confirmatory exits, test)."""
+    """All confirmatory cells and the judged family (scope x confirmatory
+    exits, test), over the filings the registration lets pass the gate."""
     view = GateView(_Scope(list(scope)), list(scope), cfg.exits, cfg.statistics)
-    cells, boots = cells_for(rows, view)
+    eligible = [r for r in rows if r.get("stratum") in cfg.entry.confirmatory_strata]
+    cells, boots = cells_for(eligible, view)
     return cells, evaluate_g1(cells, boots, view)
 
 
@@ -86,6 +88,9 @@ def build_reaction_report(
         f"**G1b: {verdict}.**",
         "",
         f"- Scope (fixed before returns were computed): {', '.join(scope)}.",
+        f"- Filings that can pass the gate: {' and '.join(rule.confirmatory_strata)} "
+        "(session = decided inside a regular session before the cutoff; "
+        "overnight = entered at the next open).",
         f"- Decision delay: {delay.total_s:.1f} s = feed latency p{rule.latency_percentile} "
         f"{delay.feed_s:.1f} s (measured on {delay.filings} live filings) + "
         f"{rule.processing_allowance_s:.0f} s + {rule.order_allowance_s:.0f} s.",
@@ -105,7 +110,7 @@ def build_reaction_report(
         )
     lines += [
         "",
-        "## Reaction curves: train and test (context)",
+        "## Reaction curves of the filings that can pass the gate: train and test (context)",
         "",
         "| Type | Exit | Period | N | Mean abnormal, before costs | Mean net | Hit rate | 95% CI |",
         "|---|---|---|---|---|---|---|---|",
@@ -142,6 +147,34 @@ def build_reaction_report(
             show(event_type, f"entries after {m3_run_date}", later, "net", cfg.exits)
     if m3_run_date is None:
         lines += ["", "M3 has no recorded run, so there is no post-M3 subsample to show."]
+    lines += [
+        "",
+        "## Baseline: the same stock, the same time of day, one session earlier",
+        "",
+        "No filing is involved; before costs; reported only. It shows how much of an "
+        "event's abnormal return an ordinary day gives anyway. The decision table does "
+        "not use it.",
+        "",
+        "| Type | Exit | N | Event, mean abnormal | Baseline, mean abnormal | Difference |",
+        "|---|---|---|---|---|---|",
+    ]
+    for event_type in scope:
+        in_session = [
+            r for r in test if r["event_type"] == event_type and r.get("stratum") == "session"
+        ]
+        for x in cfg.exits:
+            paired = [
+                r
+                for r in in_session
+                if r.get(f"abnormal_{x.name}") is not None
+                and r.get(f"placebo_{x.name}") is not None
+            ]
+            _, event = _mean(paired, f"abnormal_{x.name}")
+            n, baseline = _mean(paired, f"placebo_{x.name}")
+            lines.append(
+                f"| {event_type} | {x.name} | {n} | {_pct(event)} | {_pct(baseline)} | "
+                f"{_pct(event - baseline)} |"
+            )
     reasons = Counter((r["event_type"], r.get("filter_reason") or "kept") for r in rows)
     lines += ["", "## Every event accounted for", ""]
     lines += ["| Type | Outcome | Events |", "|---|---|---|"]

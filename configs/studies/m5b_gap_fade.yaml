@@ -1,0 +1,63 @@
+# M5 exploratory arm B, the gap fade: the machine-readable half of
+# docs/research/M5_prereg.md, Amendment 1 (2026-10-04).
+#
+# EXPLORATORY. The idea came from M3's own results, so nothing computed on
+# this history can confirm it. Registered before it was computed; the
+# engine refuses to run unless this file's hash equals the recorded one.
+
+study: m5b-gap-fade
+taxonomy_version: taxonomy-v1+6f16e1c9
+
+data:
+  source: NSE
+  start: 2019-10-01
+  end: 2026-09-30
+  train_end: 2023-12-31
+  test_start: 2024-01-01
+
+# Filings of these types made OUTSIDE market hours: after the previous
+# regular close (evenings, weekends, holidays) or in the morning, and public
+# by `latest_filing_ist` on the entry day.
+event_types: [ORDER_WIN]
+minute_precision_delay_s: 60       # as in M3 and M5
+# The entry price is the opening auction's. NSE takes pre-open orders from
+# 09:00 to 09:08 (docs/DATA_SOURCES.md, NSE market timings, verified
+# 2026-10-03): a filing public by 09:00 can be acted on in that auction, a
+# later one cannot, and is dropped from this arm.
+latest_filing_ist: "09:00"
+
+# The trade: sell short at the session's open (bhavcopy OPEN_PRICE), buy
+# back at its close (CLOSE_PRICE). Only if the stock gapped up:
+min_gap: 0.01                      # OPEN / PREV_CLOSE - 1 >= 1%
+# Controls are matched within these gap bins (lower edge inclusive). A gap at
+# or beyond the last edge is at or near a circuit and is not traded.
+gap_bins: [0.01, 0.02, 0.03, 0.05, 0.10, 0.195]
+# ... and within these liquidity buckets (20-session median traded value,
+# rupees): 1-10 crore, 10-100 crore, 100 crore and more. As in M3's report.
+liquidity_edges_rs: [10000000, 100000000, 1000000000]
+# No short within this distance of the upper price band, as a fraction of
+# the previous close (a stock locked at its upper circuit cannot be bought
+# back). Bands were recorded only from 2026-10: for earlier days the latest
+# recorded band of the stock is used as a proxy. "No Band" stocks are exempt.
+band_margin: 0.01
+# No trade on the ex-date of any corporate action (split, bonus, dividend,
+# rights): the previous close is then not comparable with the open.
+exclude_ex_dates: true
+
+filters:
+  series: [EQ]
+  min_median_turnover_rs: 10000000
+  turnover_lookback_sessions: 20
+  min_prev_close_rs: 10
+  skip_locked_day: true            # HIGH == LOW
+
+costs:
+  cost_file: configs/costs/india_equity.yaml   # verified intraday rates, latest regime
+  notional_rs: 50000
+  slippage_bps_per_side: 5         # an assumption, as in M5
+
+statistics:
+  bootstrap_resamples: 10000
+  bootstrap_seed: 20261004
+  confidence: 0.95                 # one-sided lower bounds
+  min_events: 100                  # matched events in the test period

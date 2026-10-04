@@ -8,9 +8,9 @@ that can return a row the system could not have known at ``as_of``.
 
 from __future__ import annotations
 
-from collections.abc import Collection
+from collections.abc import Collection, Iterator
 from dataclasses import dataclass
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timedelta
 from itertools import pairwise
 from typing import Any
 
@@ -89,6 +89,75 @@ class AsOf:
         if start is not None:
             query = query.where(eod_prices.c.trade_date >= start)
         return list(self._conn.execute(query.order_by(eod_prices.c.trade_date)))
+
+    def eod_range(
+        self, start: date, end: date, series: Collection[str], *, lead_days: int = 0
+    ) -> Iterator[Row[Any]]:
+        """End-of-day rows of ``series`` from ``lead_days`` before ``start``
+        to ``end``, known by the clock, by symbol then date. The whole
+        cross-section (millions of rows, so it is streamed): what a control
+        group is drawn from."""
+        e = eod_prices
+        return iter(
+            self._conn.execute(
+                select(
+                    e.c.symbol,
+                    e.c.trade_date,
+                    e.c.prev_close,
+                    e.c.open,
+                    e.c.high,
+                    e.c.low,
+                    e.c.close,
+                    e.c.turnover_lacs,
+                )
+                .where(
+                    e.c.series.in_(list(series)),
+                    e.c.trade_date >= start - timedelta(days=lead_days),
+                    e.c.trade_date <= end,
+                    e.c.available_at <= self._as_of,
+                )
+                .order_by(e.c.symbol, e.c.trade_date)
+            )
+        )
+
+    def filing_moments(self, start: datetime, end: datetime) -> Iterator[Row[Any]]:
+        """When each linked filing, of any type and source, became available
+        in ``[start, end)`` and by the clock: for asking whether a company
+        filed anything around a given session."""
+        a, link = announcements, announcement_security
+        return iter(
+            self._conn.execute(
+                select(
+                    link.c.security_id,
+                    a.c.available_at,
+                    a.c.event_ts,
+                    a.c.exch_disseminated_ts,
+                )
+                .select_from(a.join(link, link.c.announcement_id == a.c.id))
+                .where(
+                    link.c.security_id.is_not(None),
+                    a.c.available_at >= ensure_aware(start),
+                    a.c.available_at < ensure_aware(end),
+                    a.c.available_at <= self._as_of,
+                )
+            )
+        )
+
+    def latest_bands(self, series: Collection[str]) -> list[tuple[str, str | None]]:
+        """(symbol, band) from the newest price-band snapshot known by the
+        clock. Bands are recorded only from the day recording started."""
+        b = price_bands
+        newest = (
+            select(func.max(b.c.as_of_date)).where(b.c.available_at <= self._as_of)
+        ).scalar_subquery()
+        return [
+            (str(symbol), band)
+            for symbol, band in self._conn.execute(
+                select(b.c.symbol, b.c.band).where(
+                    b.c.as_of_date == newest, b.c.series.in_(list(series))
+                )
+            )
+        ]
 
     def latest_band(self, symbol: str, series: str = "EQ") -> Row[Any] | None:
         return self._conn.execute(

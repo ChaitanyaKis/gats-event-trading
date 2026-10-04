@@ -277,9 +277,10 @@ def write_parquet(rows: Sequence[dict[str, Any]], path: Path) -> None:
     import pyarrow.parquet as pq
 
     path.parent.mkdir(parents=True, exist_ok=True)
-    columns: dict[str, list[Any]] = {
-        key: [row.get(key) for row in rows] for key in (rows[0] if rows else {})
-    }
+    # Rows of a study need not share their keys (a dropped event has no
+    # returns), so the frame takes every key any row has.
+    keys = dict.fromkeys(key for row in rows for key in row)
+    columns: dict[str, list[Any]] = {key: [row.get(key) for row in rows] for key in keys}
     for key, values in columns.items():
         if any(isinstance(v, datetime) for v in values):
             columns[key] = [v.astimezone(IST) if isinstance(v, datetime) else v for v in values]

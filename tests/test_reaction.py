@@ -21,6 +21,7 @@ from gats.pit import AsOf
 from gats.rawstore import RawStore
 from gats.refdata.calendar import TradingCalendar
 from gats.research.reaction import (
+    EntryRule,
     Horizon,
     NotReady,
     ReactionConfig,
@@ -87,12 +88,24 @@ class TestConfig:
     def test_the_registered_config_is_the_one_on_disk(self, tmp_path: Path) -> None:
         assert CFG.study == "m5-intraday-reaction" and len(DIGEST) == 64
         assert [x.name for x in CFG.exits] == ["m5", "m15", "m30", "m60", "close"]
-        changed = tmp_path / "m5.yaml"
+        changed = tmp_path / "m5_reaction.yaml"
         changed.write_text(
             CONFIG.read_text(encoding="utf-8").replace("minutes: 60", "minutes: 45"), "utf-8"
         )
         with pytest.raises(RegistrationError, match="not the pre-registered config"):
             verify_reaction(changed, PREREG)
+
+    def test_amendment_1_order_wins_filed_in_market_hours(self, tmp_path: Path) -> None:
+        assert CFG.events.confirmatory == ["ORDER_WIN"] and CFG.events.exploratory == []
+        assert CFG.entry.confirmatory_strata == ["session"]
+        assert CFG.entry.latency_percentile == 95
+        with pytest.raises(ValidationError):  # a study must say which filings can pass
+            EntryRule.model_validate(CFG.entry.model_dump() | {"confirmatory_strata": []})
+        # The same design under another file name is not a registered study.
+        copy = tmp_path / "m5.yaml"
+        copy.write_bytes(CONFIG.read_bytes())
+        with pytest.raises(RegistrationError, match=r"records no SHA-256 for m5\.yaml"):
+            verify_reaction(copy, PREREG)
 
     def test_an_exit_is_minutes_or_a_named_moment(self) -> None:
         with pytest.raises(ValidationError):
@@ -164,6 +177,30 @@ class TestOneEvent:
             react(window(at(11, 0)), stock, index, CFG, cal, 45.0, COSTS)["filter_reason"]
             == "locked_entry"
         )
+
+    def test_a_session_event_carries_its_previous_session_baseline(
+        self, cal: TradingCalendar
+    ) -> None:
+        eve = date(2024, 1, 9)
+        before = session_bars(KEY, eve, 200.0, 0.05)  # another day, another drift
+        stock = before + session_bars(KEY, DAY)
+        index = session_bars(INDEX, eve, 1000.0, 0.0) + session_bars(INDEX, DAY, 1000.0, 0.0)
+        row = react(window(at(11, 0)), stock, index, CFG, cal, 45.0, COSTS)
+        started = open_at(before, at(11, 1, eve))  # the entry's clock time, a session earlier
+        for name, moment in [
+            ("m5", at(11, 6, eve)),
+            ("m60", at(12, 1, eve)),
+            ("close", at(15, 20, eve)),
+        ]:
+            assert row[f"placebo_{name}"] == pytest.approx(open_at(before, moment) / started - 1)
+        assert row["placebo_m5"] != pytest.approx(row["abnormal_m5"])
+        assert "placebo_m1" not in row  # confirmatory exits only
+        # No bars for the session before: the event stands, without a baseline.
+        alone = react(window(at(11, 0)), session_bars(KEY, DAY), index, CFG, cal, 45.0, COSTS)
+        assert alone["filter_reason"] is None and "placebo_m5" not in alone
+        # A filing entered at the next open has no same-time baseline.
+        late = react(window(at(18, 0, eve)), stock, index, CFG, cal, 45.0, COSTS)
+        assert late["stratum"] == "overnight" and "placebo_m5" not in late
 
     def test_the_market_move_is_taken_out(self, cal: TradingCalendar) -> None:
         stock = session_bars(KEY, DAY)
@@ -323,28 +360,35 @@ def test_study_rows_filters_and_periods(engine: Engine, store: RawStore, tmp_pat
 # --- the decision and the report --------------------------------------------------------
 
 
-def synthetic_rows(event_type: str, mean: float, n: int, seed: int) -> list[dict[str, object]]:
+def synthetic_rows(
+    event_type: str, mean: float, n: int, seed: int, *, overnight_extra: float = 0.0
+) -> list[dict[str, object]]:
+    """Half the events are filed in the session, half overnight (those earn
+    ``overnight_extra`` on top)."""
     import random
 
     rng = random.Random(seed)
     rows: list[dict[str, object]] = []
     for i in range(n):
+        in_session = bool(i % 2)
         row: dict[str, object] = {
             "announcement_id": seed * 10_000 + i,
             "event_type": event_type,
             "filter_reason": None,
             "period": "test",
-            "stratum": "session" if i % 2 else "overnight",
+            "stratum": "session" if in_session else "overnight",
             "entry_date": date(2024, 1, 1) + timedelta(days=i % 90),
         }
         for x in CFG.all_exits:
-            net = rng.gauss(mean, 0.01)
+            net = rng.gauss(mean + (0.0 if in_session else overnight_extra), 0.01)
             row |= {
                 f"net_{x.name}": net,
                 f"abnormal_{x.name}": net + 0.0023,
                 f"gross_{x.name}": net,
             }
             row |= {f"net0_{x.name}": net + 0.001, f"net10_{x.name}": net - 0.001}
+            if in_session:
+                row[f"placebo_{x.name}"] = -0.001
         rows.append(row)
     return rows
 
@@ -358,7 +402,10 @@ def test_g1b_passes_a_planted_effect_and_not_noise_or_small_samples() -> None:
     )
     rows = (
         synthetic_rows("ORDER_WIN", 0.004, 400, 1)
-        + synthetic_rows("PRESS_RELEASE", 0.0, 400, 2)
+        # Noise. The gate reads its 200 session filings; about one noise sample
+        # in ten passes one of five exits by chance (seed 2 does, at m60: the
+        # false discoveries BH allows), so this is a sample that does not.
+        + synthetic_rows("PRESS_RELEASE", 0.0, 400, 8)
         + synthetic_rows("BUYBACK", 0.02, 40, 3)  # a large effect on too few events
     )
     rows.append({"announcement_id": 1, "event_type": "ORDER_WIN", "filter_reason": "illiquid",
@@ -369,8 +416,8 @@ def test_g1b_passes_a_planted_effect_and_not_noise_or_small_samples() -> None:
     verdicts = {(c.event_type, c.exit): c for c in family}
     assert all(verdicts[("ORDER_WIN", x.name)].passes for x in CFG.exits)
     assert not any(verdicts[("PRESS_RELEASE", x.name)].passes for x in CFG.exits)
-    small = verdicts[("BUYBACK", "m5")]
-    assert not small.passes and any("N_test 40 < 100" in r for r in small.reasons)
+    small = verdicts[("BUYBACK", "m5")]  # only its 20 session filings count
+    assert not small.passes and any("N_test 20 < 100" in r for r in small.reasons)
 
     text, _ = build_reaction_report(
         rows, quick, digest=DIGEST, run_id="r1", experiment_id=7, scope=scope,  # type: ignore[arg-type]
@@ -381,9 +428,44 @@ def test_g1b_passes_a_planted_effect_and_not_noise_or_small_samples() -> None:
     assert "65.0 s = feed latency p95 40.0 s (measured on 900 live filings) + 20 s + 5 s" in text
     assert "| ORDER_WIN | illiquid | 1 |" in text and "| ORDER_WIN | kept | 400 |" in text
     assert "| ORDER_WIN | 10 bp slippage | m5 |" in text and "entries after 2024-02-15" in text
+    assert "- Filings that can pass the gate: session (" in text
+    assert "## Baseline: the same stock, the same time of day, one session earlier" in text
+    baseline = next(line for line in text.splitlines() if "| -0.100% |" in line)
+    assert baseline.startswith("| ORDER_WIN | m5 | 200 |")  # the session filings, paired
     nothing, _ = build_reaction_report(
-        synthetic_rows("PRESS_RELEASE", 0.0, 400, 2), quick, digest=DIGEST, run_id="r2",  # type: ignore[arg-type]
+        synthetic_rows("PRESS_RELEASE", 0.0, 400, 8), quick, digest=DIGEST, run_id="r2",  # type: ignore[arg-type]
         experiment_id=8, scope=["PRESS_RELEASE"], delay=Delay(40.0, 900, 65.0),
     )  # fmt: skip
     assert "**G1b: no tradeable remainder found.**" in nothing
     assert "M3 has no recorded run" in nothing
+
+
+def test_only_filings_made_in_market_hours_can_pass() -> None:
+    from gats.research.reaction_report import decide
+
+    quick = CFG.model_copy(
+        update={"statistics": CFG.statistics.model_copy(update={"bootstrap_resamples": 500})}
+    )
+    # A loss in the session and a large gain overnight: pooled, it would pass.
+    rows = synthetic_rows("ORDER_WIN", -0.002, 400, 5, overnight_extra=0.03)
+    _, family = decide(rows, quick, ["ORDER_WIN"])  # type: ignore[arg-type]
+    assert len(family) == 5 and all(c.n == 200 for c in family)  # the overnight half is out
+    assert not any(c.passes for c in family)
+    pooled_rule = quick.entry.model_copy(update={"confirmatory_strata": ["session", "overnight"]})
+    _, pooled = decide(rows, quick.model_copy(update={"entry": pooled_rule}), ["ORDER_WIN"])  # type: ignore[arg-type]
+    assert all(c.n == 400 and c.passes for c in pooled)
+
+
+def test_the_saved_frame_keeps_every_column(tmp_path: Path) -> None:
+    import pyarrow.parquet as pq
+
+    from gats.research.event_study import write_parquet
+
+    rows = [
+        {"announcement_id": 1, "filter_reason": "no_bar"},  # a dropped event comes first
+        {"announcement_id": 2, "filter_reason": None, "net_m5": 0.01, "placebo_m5": -0.001},
+    ]
+    write_parquet(rows, tmp_path / "events.parquet")
+    table = pq.read_table(tmp_path / "events.parquet")
+    assert table.column_names == ["announcement_id", "filter_reason", "net_m5", "placebo_m5"]
+    assert table.column("net_m5").to_pylist() == [None, 0.01]

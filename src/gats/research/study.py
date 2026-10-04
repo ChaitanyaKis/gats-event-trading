@@ -122,6 +122,19 @@ def registered_hash(prereg: Path) -> str:
     return found.group(1)
 
 
+def registered_hash_for(prereg: Path, config: Path) -> str:
+    """The hash a pre-registration records for ``config``. A document can
+    register more than one config (a study and its amendments' arms), so
+    each hash is found by the file name written before it."""
+    found = re.search(
+        re.escape(config.name) + r"`[^`]*SHA-256[^`]*`([0-9a-f]{64})`",
+        prereg.read_text(encoding="utf-8"),
+    )
+    if found is None:
+        raise RegistrationError(f"{prereg} records no SHA-256 for {config.name}")
+    return found.group(1)
+
+
 def verify_registration(config: Path, prereg: Path) -> tuple[StudyConfig, str]:
     """Load the study only if the config is exactly the registered one."""
     study, actual = load_study(config)
