@@ -1,9 +1,36 @@
 # GATS
 
-GATS is an event-driven research and trading platform for Indian equities.
-It currently ships **M1, the 24/7 data recorder**, and **M2, reference data**
-(which company each filing is about, across NSE and BSE, point-in-time).
-It records, point-in-time:
+GATS is an event-driven research and trading platform for Indian equities
+(NSE/BSE). It asks one question and tries hard not to fool itself answering
+it: *do company filings (order wins first) move prices in a way that can
+still be traded after they are public, and after costs?*
+
+**Status (October 2026).** All eight milestones are built and tested
+offline. **No trading result exists yet**: the research runs wait for data,
+and every gate between them is a person's decision, not the code's. Nothing
+here has traded real money. Live trading is off by default, behind three
+independent locks that only a person can open.
+
+| Milestone | Built | Still needs |
+|---|---|---|
+| M1 Recorder | 24/7 point-in-time recorder of filings, prices, reference data | to be left running |
+| M2 Reference data | security master, trading calendar, corporate actions | nothing |
+| M3 Event study | pre-registered daily study: the cheap kill test | the history backfill, then gate G1 |
+| M4 Extraction | rules, then a local LLM, for order values; an evaluation set | 300 human labels |
+| M5 Intraday | one-minute bars; pre-registered reaction study | a broker data token, measured latency; gate G1b |
+| M6 Backtester | pessimistic fills, verified costs, risk veto, experiment registry | bars and events; gate G2 |
+| M7 Paper trading | the same engine fed live, journal and replay, alerts | two months of paper trading; gate G3 |
+| M8 Live pilot | approval gate, hard caps, order layer (never used) | a human, entirely |
+
+How it tries not to fool itself: every row carries the time it became
+knowable and research reads only through a point-in-time view; studies are
+pre-registered with their configs pinned by hash; the holdout is used once;
+every experiment is logged before it runs; and "no edge found" is a result
+to be reported, not a bug to be tuned away. The reasoning is in
+[`docs/DESIGN.md`](docs/DESIGN.md); one page per milestone in
+[`docs/learning/`](docs/learning/).
+
+The recorder stores, point-in-time:
 
 | Data | Source | Schedule | Why it matters |
 |---|---|---|---|
@@ -238,8 +265,11 @@ type `/gats` in each session.
 
 ## Roadmap
 
-M1 recorder (done) → M2 reference data + entity resolution (done) → M3 daily event
+M1 recorder → M2 reference data and entity resolution → M3 daily event
 study (the cheap test of whether an edge exists) → M4 LLM extraction →
-M5 minute data + reaction curves → M6 backtester → M7 paper trading →
-M8 live pilot (human-activated only). Details: [`docs/ROADMAP.md`](docs/ROADMAP.md);
-rationale: [`docs/DESIGN.md`](docs/DESIGN.md).
+M5 minute data and reaction curves → M6 backtester → M7 paper trading →
+M8 live pilot (human-activated only). The code for all eight exists; the
+gates G1 to G4 between them are passed by results and by a person, and none
+has been passed yet. Tasks: [`docs/ROADMAP.md`](docs/ROADMAP.md); where things
+stand: [`docs/PROGRESS.md`](docs/PROGRESS.md); rationale:
+[`docs/DESIGN.md`](docs/DESIGN.md).
