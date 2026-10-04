@@ -11,7 +11,7 @@ import platform
 import signal
 import sys
 from collections import Counter
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import asdict, fields
 from datetime import date, time, timedelta
 from enum import StrEnum
@@ -20,6 +20,7 @@ from typing import Annotated, Any
 
 import typer
 from sqlalchemy import func, select
+from sqlalchemy.exc import OperationalError
 
 from gats import __version__, ingest
 from gats.config import Settings
@@ -49,13 +50,13 @@ from gats.refdata.ingest import (
     ingest_nse_surveillance,
     ingest_nse_symbol_changes,
 )
-from gats.refdata.link import link_pending
+from gats.refdata.link import link_all
 from gats.research.taxonomy import (
     CONTAINERS,
     NOISE,
     OTHER,
     Taxonomy,
-    classify_pending,
+    classify_all,
     coverage,
     event_level_coverage,
 )
@@ -164,6 +165,27 @@ def _parse_day(value: str) -> date:
         return date.fromisoformat(value)
     except ValueError as exc:
         raise typer.BadParameter(f"expected YYYY-MM-DD, got {value!r}") from exc
+
+
+_LOCK_RETRIES = 6
+
+
+async def _patiently(step: Callable[[], Awaitable[Any]], what: str) -> Any:
+    """Run one idempotent step of a long job, waiting out a busy database.
+
+    A backfill shares the SQLite file with the recorder, and SQLite has one
+    writer at a time. If a write still cannot get the lock after the busy
+    timeout, the step is tried again after a pause: one unlucky moment must
+    not end a job that runs for hours."""
+    for attempt in range(1, _LOCK_RETRIES + 1):
+        try:
+            return await step()
+        except OperationalError as exc:
+            if "locked" not in str(exc).lower() or attempt == _LOCK_RETRIES:
+                raise
+            pause = 15 * attempt
+            typer.echo(f"{what}: the database is busy; trying again in {pause} s")
+            await asyncio.sleep(pause)
 
 
 def _print_outcome(label: str, outcome: Outcome) -> None:
@@ -369,14 +391,20 @@ def backfill_announcements(
     async def main() -> None:
         async with _services(settings) as svc:
             for day in daterange(first, last):
-                if skip_complete:
-                    with svc.engine.begin() as conn:
-                        if repo.backfill_day_status(conn, src, day) == "complete":
-                            typer.echo(f"{day}: complete, skipping")
-                            continue
-                outcome = await ingest.backfill_day(
-                    svc, src, day, job=f"backfill_{source.value}", max_pages=pages
-                )
+
+                async def one_day(day: date = day) -> Outcome | None:
+                    if skip_complete:
+                        with svc.engine.begin() as conn:
+                            if repo.backfill_day_status(conn, src, day) == "complete":
+                                return None
+                    return await ingest.backfill_day(
+                        svc, src, day, job=f"backfill_{source.value}", max_pages=pages
+                    )
+
+                outcome = await _patiently(one_day, str(day))
+                if outcome is None:
+                    typer.echo(f"{day}: complete, skipping")
+                    continue
                 _print_outcome(f"{day} [{outcome.meta.get('backfill_status')}]", outcome)
 
     try:
@@ -396,16 +424,22 @@ def _backfill_daily(
             for day in daterange(first, last):
                 if day.weekday() >= 5 and not weekends:
                     continue
-                with svc.engine.begin() as conn:
-                    if repo.has_rows_for_date(
-                        conn, spec.rows_table, "trade_date", day
-                    ) or repo.eod_day_settled(
-                        repo.eod_day(conn, day, spec.days_table),
-                        today=today,
-                        max_attempts=settings.eod_max_missing_attempts,
-                    ):
-                        continue
-                outcome = await ingest.ingest_daily_file(svc, spec, day, job=job, mode="backfill")
+
+                async def one_day(day: date = day) -> Outcome | None:
+                    with svc.engine.begin() as conn:
+                        if repo.has_rows_for_date(
+                            conn, spec.rows_table, "trade_date", day
+                        ) or repo.eod_day_settled(
+                            repo.eod_day(conn, day, spec.days_table),
+                            today=today,
+                            max_attempts=settings.eod_max_missing_attempts,
+                        ):
+                            return None
+                    return await ingest.ingest_daily_file(svc, spec, day, job=job, mode="backfill")
+
+                outcome = await _patiently(one_day, str(day))
+                if outcome is None:
+                    continue
                 if outcome.http_status == 404:
                     label = f"{day} (no file: weekend, holiday or not published)"
                 elif outcome.ok and outcome.n_records == 0:
@@ -514,11 +548,18 @@ def backfill_results(
                 f"{len(symbols)} companies with {event_type} filings; asking about {len(todo)}"
             )
             for symbol in todo:
-                outcome = await ingest_results_index(svc, symbol, job="backfill_results")
-                _print_outcome(symbol, outcome)
-            stats = await fetch_pending_xbrl(
-                svc, since=_parse_day(since), limit=limit, job="backfill_results"
-            )
+
+                async def one_company(symbol: str = symbol) -> Outcome:
+                    return await ingest_results_index(svc, symbol, job="backfill_results")
+
+                _print_outcome(symbol, await _patiently(one_company, symbol))
+
+            async def read_xbrl() -> Any:
+                return await fetch_pending_xbrl(
+                    svc, since=_parse_day(since), limit=limit, job="backfill_results"
+                )
+
+            stats = await _patiently(read_xbrl, "XBRL")
             typer.echo(f"XBRL: {stats.attempted} read, {stats.done} done, {stats.failed} failed")
 
     asyncio.run(main())
@@ -848,8 +889,7 @@ def refdata_build() -> None:
     typer.echo(f"build {stats.build_id}: {stats.as_dict()}")
     for conflict in stats.conflicts[:10]:
         typer.echo(f"  conflict: {conflict}")
-    with engine.begin() as conn:
-        linked = link_pending(conn, utcnow())
+    linked = link_all(engine, utcnow())
     engine.dispose()
     typer.echo(
         f"linked {linked.linked} filings, {linked.unresolved} unresolved "
@@ -959,8 +999,7 @@ def events_classify() -> None:
     tax = _taxonomy(settings)
     engine = make_engine(settings.resolved_db_url)
     init_db(engine)
-    with engine.begin() as conn:
-        stats = classify_pending(conn, tax, utcnow())
+    stats = classify_all(engine, tax, utcnow())
     engine.dispose()
     typer.echo(
         f"{tax.version}: typed {stats.classified} filings {dict(stats.by_type.most_common())}"
@@ -1201,13 +1240,12 @@ def extract_texts(
     limit: Annotated[int, typer.Option(help="Most documents in this run.")] = 10**7,
 ) -> None:
     """Extract text from every downloaded attachment not yet extracted."""
-    from gats.extract.texts import extract_pending
+    from gats.extract.texts import extract_all
 
     settings = _settings()
     engine = make_engine(settings.resolved_db_url)
     init_db(engine)
-    with engine.begin() as conn:
-        stats = extract_pending(conn, RawStore(settings.raw_dir), utcnow(), limit=limit)
+    stats = extract_all(engine, RawStore(settings.raw_dir), utcnow(), limit=limit)
     engine.dispose()
     typer.echo(
         f"{stats.documents} documents: {stats.with_text} with text, "
@@ -1372,14 +1410,18 @@ def label_prepare(
         async with _services(settings) as svc:
             with svc.engine.begin() as conn:
                 ids = resolve(conn, sample)
-            return await run_extractions(
-                svc,
-                event_type=sample.event_type,
-                taxonomy_version=sample.taxonomy_version,
-                mode="llm",
-                limit=limit,
-                ids=set(ids.values()),
-            )
+
+            async def answer() -> Any:  # resumable: answers already stored are not asked again
+                return await run_extractions(
+                    svc,
+                    event_type=sample.event_type,
+                    taxonomy_version=sample.taxonomy_version,
+                    mode="llm",
+                    limit=limit,
+                    ids=set(ids.values()),
+                )
+
+            return await _patiently(answer, "label prepare")
 
     stats = asyncio.run(main())
     typer.echo(

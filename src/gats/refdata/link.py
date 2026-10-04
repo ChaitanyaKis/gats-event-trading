@@ -21,7 +21,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import Connection, and_, or_, select, true
+from sqlalchemy import Connection, Engine, and_, or_, select, true
 
 from gats.db import repo
 from gats.db.schema import announcement_security, announcements, securities
@@ -139,3 +139,27 @@ def link_pending(
         if len(rows) < _BATCH:
             break
     return stats
+
+
+def link_all(
+    engine: Engine, now: datetime, resolver: Resolver | None = None, *, chunk: int = 2000
+) -> LinkStats:
+    """Link everything that needs it, one small transaction per chunk, so
+    other writers get the database in between (see ``classify_all``)."""
+    total = LinkStats()
+    while True:
+        with engine.begin() as conn:
+            if resolver is None:
+                build_id = latest_build_id(conn)
+                if build_id is None:
+                    return total
+                resolver = Resolver.load(conn, build_id)
+            stats = link_pending(conn, now, resolver, max_rows=chunk)
+        total.build_id = stats.build_id
+        total.considered += stats.considered
+        total.linked += stats.linked
+        total.unresolved += stats.unresolved
+        for method, n in stats.by_method.items():
+            total.by_method[method] = total.by_method.get(method, 0) + n
+        if stats.considered < chunk:
+            return total

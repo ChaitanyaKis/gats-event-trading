@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import Connection, and_, func, select, true
+from sqlalchemy import Connection, Engine, and_, func, select, true
 
 from gats.db import repo
 from gats.db.schema import (
@@ -162,3 +162,23 @@ def document_text(conn: Connection, doc_id: str) -> str | None:
         .limit(1)
     ).first()
     return None if row is None else str(row.text)
+
+
+def extract_all(
+    engine: Engine, store: RawStore, now: datetime, *, limit: int = 10**7, chunk: int = 20
+) -> ExtractStats:
+    """Extract up to ``limit`` pending attachments, a few per transaction.
+    Reading PDFs is slow; done inside one transaction it would keep the
+    write lock for minutes."""
+    total = ExtractStats()
+    while total.documents < limit:
+        with engine.begin() as conn:
+            stats = extract_pending(conn, store, now, limit=min(chunk, limit - total.documents))
+        total.documents += stats.documents
+        total.with_text += stats.with_text
+        total.needs_ocr += stats.needs_ocr
+        total.errors += stats.errors
+        total.error_samples = (total.error_samples + stats.error_samples)[:5]
+        if stats.documents < chunk:
+            break
+    return total

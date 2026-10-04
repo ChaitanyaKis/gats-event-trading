@@ -21,7 +21,7 @@ from typing import Any
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator
-from sqlalchemy import Connection, and_, func, select, true
+from sqlalchemy import Connection, Engine, and_, func, select, true
 
 from gats.db import repo
 from gats.db.schema import announcement_event_types, announcements
@@ -302,6 +302,23 @@ def classify_pending(
         repo.insert_ignore(conn, done, out, ["announcement_id", "taxonomy_version"])
         stats.classified += len(rows)
     return stats
+
+
+def classify_all(
+    engine: Engine, taxonomy: Taxonomy, now: datetime, *, chunk: int = 2000
+) -> ClassifyStats:
+    """Type everything pending, one small transaction per chunk. A backlog
+    of a hundred thousand filings typed in a single transaction holds the
+    database's only write lock for a minute, and every other writer (a
+    backfill, the paper runtime) gives up waiting."""
+    total = ClassifyStats(taxonomy.version)
+    while True:
+        with engine.begin() as conn:
+            stats = classify_pending(conn, taxonomy, now, max_rows=chunk)
+        total.classified += stats.classified
+        total.by_type.update(stats.by_type)
+        if stats.classified < chunk:
+            return total
 
 
 @dataclass

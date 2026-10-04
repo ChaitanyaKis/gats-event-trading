@@ -9,6 +9,8 @@ from sqlalchemy import Connection, Engine, create_engine, event, inspect, select
 
 from gats.db.schema import SCHEMA_VERSION, backfill_days, metadata, schema_meta
 
+BUSY_TIMEOUT_MS = 120_000
+
 
 class SchemaVersionError(RuntimeError):
     pass
@@ -101,7 +103,11 @@ def make_engine(url: str) -> Engine:
             # WAL lets `gats status` read while the recorder writes.
             cursor.execute("PRAGMA journal_mode=WAL")
             cursor.execute("PRAGMA foreign_keys=ON")
-            cursor.execute("PRAGMA busy_timeout=10000")
+            # SQLite has one writer at a time. Several processes share this
+            # file (recorder, backfills, paper runtime): a writer waits this
+            # long for the lock before giving up. Ten seconds was not enough
+            # once a batch job held it for eleven.
+            cursor.execute(f"PRAGMA busy_timeout={BUSY_TIMEOUT_MS}")
             cursor.execute("PRAGMA synchronous=NORMAL")
             cursor.close()
 

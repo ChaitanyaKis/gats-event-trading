@@ -25,7 +25,7 @@ from gats import ingest
 from gats.db import repo
 from gats.db.repo import IngestMode
 from gats.db.schema import announcement_event_types, announcements, financial_results
-from gats.extract.texts import ExtractStats, extract_pending
+from gats.extract.texts import ExtractStats, extract_all, extract_pending
 from gats.ingest import Outcome, Services
 from gats.logging_setup import kv
 from gats.refdata import dedupe, master, versions
@@ -36,9 +36,9 @@ from gats.refdata.ingest import (
     ingest_nse_surveillance,
     ingest_nse_symbol_changes,
 )
-from gats.refdata.link import link_pending
+from gats.refdata.link import link_all, link_pending
 from gats.refdata.results import fetch_pending_xbrl, ingest_results_index
-from gats.research.taxonomy import Taxonomy, classify_pending
+from gats.research.taxonomy import Taxonomy, classify_all, classify_pending
 from gats.sources import (
     bse_scrips,
     nse_corp_actions,
@@ -281,7 +281,7 @@ class LinkJob:
             if build_id != self._build_id or self._resolver is None:
                 self._resolver = master.Resolver.load(conn, build_id)
                 self._build_id = build_id
-            stats = link_pending(conn, svc.clock(), self._resolver)
+        stats = link_all(svc.engine, svc.clock(), self._resolver)
         return Outcome(
             ok=True,
             n_records=stats.considered,
@@ -329,8 +329,7 @@ class ClassifyJob:
         mtime = self.path.stat().st_mtime
         if self._taxonomy is None or mtime != self._mtime:
             self._taxonomy, self._mtime = Taxonomy.load(self.path), mtime
-        with svc.engine.begin() as conn:
-            stats = classify_pending(conn, self._taxonomy, svc.clock())
+        stats = classify_all(svc.engine, self._taxonomy, svc.clock())
         return Outcome(ok=True, n_records=stats.classified, n_new=stats.classified)
 
 
@@ -345,8 +344,7 @@ class ExtractJob:
         return self.poll_s
 
     async def run_once(self, svc: Services) -> Outcome:
-        with svc.engine.begin() as conn:
-            stats = extract_pending(conn, svc.store, svc.clock(), limit=500)
+        stats = extract_all(svc.engine, svc.store, svc.clock(), limit=500)
         return Outcome(ok=True, n_records=stats.documents, n_new=stats.with_text)
 
 
