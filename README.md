@@ -80,6 +80,15 @@ gats status
 del .env                             # back to real endpoints
 ```
 
+A whole paper-trading session, offline, in a few seconds (simulated clock,
+temporary directory, `.env` not read): the mock exchange publishes an order
+win, the recorder's hand-off reads it, the strategy buys on mock candles,
+sells an hour later, and the day is closed.
+
+```powershell
+.venv\Scripts\python scripts\paper_smoke.py
+```
+
 ---
 
 ## Commands
