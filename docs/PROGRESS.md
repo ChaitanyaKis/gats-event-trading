@@ -4,8 +4,8 @@ Claude Code updates this after every task. Newest log entry first.
 
 ## Status
 
-- **Version:** 0.2.0 · **Schema:** v11 · **Milestone:** M3 (M1 and M2 complete)
-- **Next up:** Everything that can be built without the human is built and verified offline (744 tests, plus `scripts/paper_smoke.py`). What remains needs data, the human or a gate. When items arrive, in this order: token (6) -> probe candles, check costs against the broker's calculator, fetch bars; backfill (3) -> M3 run and G1, then results backfill (7); labels (5) -> T4.6 then T4.7; recorder latency (1) -> T5.3 and G1b; then G2; one real paper day (10) -> T7.2 latency budget [ASK]; two months of paper -> T7.5 and G3. To check at the M3 run: the share of unlinked events by year (survivorship). Waiting on the human: recorder (1), GitHub (2), M3 backfill (3), labels (5), Upstox token (6), results (7), items 8 to 12
+- **Version:** 0.3.0 · **Schema:** v11 · **Milestone:** M3 complete; **gate G1 NOT passed: waiting for the human's decision** (`docs/research/M3_decision.md`)
+- **Next up:** nothing until the human decides at G1 (options 1 to 4 in the decision note; Claude recommends option 1, the intraday test). If option 1: Upstox token (item 6) -> probe candles and costs, fetch bars; recorder latency (item 1) -> T5.3 and G1b. The results backfill (item 7) was started on 2026-10-04 and is resumable; rerun it only if the human continues with S1. Waiting on the human: G1 decision, recorder restart (1), labels (5, only if S1 continues), Upstox token (6), items 8 to 12
 
 ## Waiting on the human (HUMAN)
 
@@ -139,7 +139,7 @@ are PowerShell, run from `C:\Projects\GATS`.
 - [x] M1 core recorder (0.1.0 → 0.1.2)
 - [x] M1 finishing: T1.1 ✅ · T1.2 ✅ · T1.3 ✅ · T1.4 ✅ · T1.5 ✅ · T1.6 ✅
 - [x] M2 Reference data & entity resolution (0.2.0): T2.1 ✅ · T2.2 ✅ · T2.3 ✅ · T2.4 ✅ · T2.5 ✅ · T2.6 ✅ · T2.7 ✅ · T2.8 ✅ · T2.9 ✅
-- [ ] M3 Event study (G1 kill test): T3.0 ⏳ (human) · T3.1 ⚠️ · T3.2 ✅ · T3.3 ✅ · T3.4 ✅ (code; real run ⏳ backfill) · T3.5 ⏳ (gate, after the real run)
+- [x] M3 Event study (G1 kill test, 0.3.0): T3.0 ✅ · T3.1 ⚠️ (OTHER above target, see log) · T3.2 ✅ · T3.3 ✅ · T3.4 ✅ · T3.5 ✅ (decision note written; **G1 not passed**, the human decides)
 - [ ] M4 LLM extraction (infrastructure for ORDER_WIN; scope confirmed at G1): T4.1 ✅ · T4.2 ✅ · T4.3 ✅ · T4.4 ✅ · T4.5 ⏳ (code ✅; labels: human) · T4.6 ⏳ (code ✅; needs the labels) · T4.7 ⏳ (pre-registered; code ✅; the run needs items 3, 5 and 7)
 - [ ] M5 Intraday data & reaction curves (G1b): T5.1 ⏳ (code ✅; token: human, item 6) · T5.2 ⏳ (code ✅; the fetch needs the token) · T5.3 ⏳ (pre-registered; code ✅; the run needs bars and recorder latency) · T5.4 ⏳ (gate)
 - [ ] M6 Backtester (G2): T6.1 ⏳ (model ✅; broker-calculator check needs the token, item 6) · T6.2 ✅ · T6.3 ✅ · T6.4 ✅ · T6.5 ✅ · T6.6 ✅ · T6.7 ✅ · T6.8 ⏳ (code ✅; the G2 run needs bars, events and T4.7's revenue feature)
@@ -157,6 +157,24 @@ are PowerShell, run from `C:\Projects\GATS`.
 ## Log
 
 - **2026-10-04:**
+  - **M3 run and gate G1: no edge found at the daily horizon.** Pre-registered run
+    `20261004T061547Z` on the full backfill (1,042,483 NSE filings, 1,738 sessions). All
+    20 confirmatory tests have a negative mean in the test period; order wins lose 0.97%
+    to 1.21% after costs and 0.47% to 0.71% before. Placebo (`scripts/m3_placebo.py`):
+    ordinary stock-days lose about 0.1% the same day, so the yardstick is slightly tilted
+    and the result is not explained by it. Exploratory: 41% of order wins are filed during
+    the session, where the daily entry comes a day late. `docs/research/M3_decision.md`
+    lists four options; stopped for the human. Version 0.3.0.
+  - T3.0 done: Claude ran the backfill at the human's request. Three failures on the way,
+    each fixed at its cause: (1) starting the recorder killed three running jobs with
+    "database is locked" (its first pass linked 156,000 filings in one transaction):
+    longer lock wait, batch jobs in small transactions, backfills that retry; (2) NSE's
+    price file for 2022-08-08 is an Excel workbook served as .csv: the parser reads it,
+    and no unreadable file can crash an ingestion; (3) the recorder began downloading
+    the attachments of a million backfilled filings (about 1 GB an hour): it now takes
+    recent filings only. Also wrong: Claude said one Ctrl+C restarts the recorder; it ends
+    the loop. Taxonomy coverage by year (untyped share of non-noise filings): 40 to 68%
+    in 2019 to 2023, 34% in 2024, 22% in 2025, 17% in 2026.
   - T1.6 done: the human logged in to GitHub (device code) and asked for a public
     repository; pushed to https://github.com/ChaitanyaKis/gats-event-trading. First CI run
     green on all six jobs (Ubuntu and Windows, Python 3.11/3.12/3.14), which also covers

@@ -1,7 +1,22 @@
 # Changelog
 
-## Unreleased
-Schema v11 (new tables only), upgraded automatically.
+## 0.3.0 (2026-10-04)
+M3 is complete: the pre-registered event study has been run on seven years
+of data. Schema v11 (new tables only), upgraded automatically.
+
+- **M3 result: no edge at the daily horizon (gate G1 not passed).** Buying
+  at the first open after an order win, rating upgrade, buyback, bonus/split
+  or press release and holding up to five sessions loses to the Nifty 500 on
+  every test, before and after costs, in and out of sample.
+  `reports/M3_event_study.md`, `docs/research/M3_decision.md`; a placebo on
+  ordinary stock-days: `scripts/m3_placebo.py`.
+- **History backfilled:** 1,738 sessions of prices, 1,736 of index closes,
+  1.04 million NSE filings (2019-10 to 2026-10).
+- **Fixes found by running on real history:** writers no longer die on a
+  busy database (longer lock wait, batch jobs in small transactions,
+  backfills that retry); NSE's one price file published as an Excel
+  workbook is read; the recorder downloads attachments of recent filings
+  only, not a million old ones.
 
 - **Kill criteria:** the risk limits (`configs/risk.yaml`) now stop new
   entries when equity falls `max_drawdown_pct_equity` below its peak or when
