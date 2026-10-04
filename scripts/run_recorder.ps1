@@ -1,7 +1,9 @@
 # Keeps the GATS recorder running on Windows: restarts it if it exits.
 # Usage (from the repo root, venv already created):
 #   powershell -ExecutionPolicy Bypass -File scripts\run_recorder.ps1
-# Stop with Ctrl+C twice (once for the recorder, once for this loop).
+# Stop with Ctrl+C: that ends the recorder AND this loop (verified 2026-10-04).
+# The loop is for crashes: if the recorder exits by itself, it is started again.
+# To restart after a code update: Ctrl+C, then run this script again.
 
 $ErrorActionPreference = "Continue"
 $repo = Split-Path -Parent $PSScriptRoot

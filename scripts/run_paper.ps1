@@ -2,7 +2,8 @@
 # Usage (from the repo root, with the recorder already running in its own
 # terminal: it is the only source of filings):
 #   powershell -ExecutionPolicy Bypass -File scripts\run_paper.ps1 -Name s1
-# Stop with Ctrl+C twice (once for the runtime, once for this loop).
+# Stop with Ctrl+C: that ends the runtime AND this loop. The loop is for
+# crashes: if the runtime exits by itself, it is started again.
 #
 # Paper trading cannot send an order. If the runtime REFUSES to start (a
 # changed design, a record the code no longer reproduces, no token), this
