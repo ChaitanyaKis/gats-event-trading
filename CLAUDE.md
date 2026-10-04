@@ -44,9 +44,11 @@ Run it when the user types `/gats`, "continue", "go" or "next".
 7. **Record.**
    - Tick the task in PROGRESS.md, add a 1–3 line log entry (newest first),
      and set "Next up".
-   - Add user-visible changes to CHANGELOG.md.
-   - At the end of each milestone: bump the minor version and write
-     `docs/learning/M<n>.md` (see "Communicating").
+   - **Documentation freeze (Chaitanya, 2026-10-04), until he lifts it:**
+     write only what data, running or testing need: PROGRESS.md (short),
+     DATA_SOURCES.md, `.env.example`, pre-registrations and
+     `docs/research/trials.md`. No CHANGELOG, README, DESIGN, architecture or
+     learning notes. At the end of a milestone still bump the minor version.
 8. **Continue** to the next task without waiting. **Stop only when:**
    - you reach a `HUMAN` step or a decision gate (`G*`), or
    - you've made 3 honest attempts and are still blocked (write the evidence
