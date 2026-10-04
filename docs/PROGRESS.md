@@ -4,7 +4,7 @@ Claude Code updates this after every task. Newest log entry first.
 
 ## Status
 
-- **Version:** 0.2.0 · **Schema:** v11 · **Milestone:** M3 (M1 waits only on T1.6, HUMAN)
+- **Version:** 0.2.0 · **Schema:** v11 · **Milestone:** M3 (M1 and M2 complete)
 - **Next up:** Everything that can be built without the human is built and verified offline (744 tests, plus `scripts/paper_smoke.py`). What remains needs data, the human or a gate. When items arrive, in this order: token (6) -> probe candles, check costs against the broker's calculator, fetch bars; backfill (3) -> M3 run and G1, then results backfill (7); labels (5) -> T4.6 then T4.7; recorder latency (1) -> T5.3 and G1b; then G2; one real paper day (10) -> T7.2 latency budget [ASK]; two months of paper -> T7.5 and G3. To check at the M3 run: the share of unlinked events by year (survivorship). Waiting on the human: recorder (1), GitHub (2), M3 backfill (3), labels (5), Upstox token (6), results (7), items 8 to 12
 
 ## Waiting on the human (HUMAN)
@@ -16,13 +16,9 @@ are PowerShell, run from `C:\Projects\GATS`.
    awake: Settings → System → Power → Screen and sleep → Never when plugged in):
    `powershell -ExecutionPolicy Bypass -File scripts\run_recorder.ps1`
    Check it any time with `.venv\Scripts\gats status`.
-2. **T1.6 GitHub + CI.** `gh` 2.96 is installed but not logged in.
-   ```powershell
-   gh auth login            # GitHub.com → HTTPS → Login with a web browser
-   gh repo create gats --private --source . --remote origin --push
-   gh run watch             # wait for CI (Ubuntu + Windows, Py 3.11/3.12/3.14)
-   ```
-   Then send back the CI run URL (or type `/gats`; Claude checks `gh run list`).
+2. ~~T1.6 GitHub + CI.~~ **Done 2026-10-04.** Public repository
+   https://github.com/ChaitanyaKis/gats-event-trading; CI green on Ubuntu and
+   Windows with Python 3.11, 3.12 and 3.14 (run 37176805953).
 
 3. **T3.0 Backfill plan [ASK] — approve by running it.** Range
    2019-10-01 → 2026-10-02 (EOD prices start 2019-10-01). Estimates use rates
@@ -141,7 +137,7 @@ are PowerShell, run from `C:\Projects\GATS`.
 ## Milestones
 
 - [x] M1 core recorder (0.1.0 → 0.1.2)
-- [ ] M1 finishing: T1.1 ✅ · T1.2 ✅ · T1.3 ✅ · T1.4 ✅ · T1.5 ✅ · T1.6
+- [x] M1 finishing: T1.1 ✅ · T1.2 ✅ · T1.3 ✅ · T1.4 ✅ · T1.5 ✅ · T1.6 ✅
 - [x] M2 Reference data & entity resolution (0.2.0): T2.1 ✅ · T2.2 ✅ · T2.3 ✅ · T2.4 ✅ · T2.5 ✅ · T2.6 ✅ · T2.7 ✅ · T2.8 ✅ · T2.9 ✅
 - [ ] M3 Event study (G1 kill test): T3.0 ⏳ (human) · T3.1 ⚠️ · T3.2 ✅ · T3.3 ✅ · T3.4 ✅ (code; real run ⏳ backfill) · T3.5 ⏳ (gate, after the real run)
 - [ ] M4 LLM extraction (infrastructure for ORDER_WIN; scope confirmed at G1): T4.1 ✅ · T4.2 ✅ · T4.3 ✅ · T4.4 ✅ · T4.5 ⏳ (code ✅; labels: human) · T4.6 ⏳ (code ✅; needs the labels) · T4.7 ⏳ (pre-registered; code ✅; the run needs items 3, 5 and 7)
@@ -161,6 +157,14 @@ are PowerShell, run from `C:\Projects\GATS`.
 ## Log
 
 - **2026-10-04:**
+  - T1.6 done: the human logged in to GitHub (device code) and asked for a public
+    repository; pushed to https://github.com/ChaitanyaKis/gats-event-trading. First CI run
+    green on all six jobs (Ubuntu and Windows, Python 3.11/3.12/3.14), which also covers
+    everything built since M2 on Linux for the first time. The README's opening now states
+    the real status (all milestones coded, no result yet). T3.0: the human approved the
+    backfill by asking Claude to run it; prices and NSE filings are being loaded in the
+    background, then indices, the master rebuild and the results backfill. T4.5: the human
+    chose to label all 300 filings personally; the LLM's answers are being prepared.
   - DESIGN's production kill criteria are now enforced, not only described. Found while
     re-reading `configs/risk.yaml`: it said production disables a strategy beyond the
     drawdown limit, and nothing did. In the risk engine (so in backtest, paper and live):
