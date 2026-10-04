@@ -24,7 +24,7 @@ from gats.timeutil import parse_date
 SOURCE = "NSE"
 
 EOD_KIND = "nse_eod"
-EOD_PARSER_VERSION = "nse-eod-v1"
+EOD_PARSER_VERSION = "nse-eod-v2"  # v2: reads a workbook served as .csv
 BANDS_KIND = "nse_bands"
 BANDS_PARSER_VERSION = "nse-bands-v1"
 INSTRUMENTS_KIND = "nse_instruments"

@@ -547,18 +547,8 @@ async def ingest_daily_file(
     available_at = (
         ist_datetime(day, settings.eod_publish_after_ist) if mode == "backfill" else got.fetched_at
     )
-    try:
-        parsed = spec.parse(got.content, day)
-    except PayloadError as exc:
-        return record_bad_payload(
-            svc,
-            got,
-            job=job,
-            kind=spec.kind,
-            error=exc,
-            meta={"trade_date": day.isoformat()},
-            source=spec.source,
-        )
+    # Raw first: the payload is stored before the parser sees it, so even a
+    # parser bug cannot lose what the exchange sent.
     with svc.engine.begin() as conn:
         doc_id = repo.save_raw(
             conn,
@@ -575,6 +565,19 @@ async def ingest_daily_file(
                 "available_at": available_at.isoformat(),
             },
         )
+    try:
+        parsed = spec.parse(got.content, day)
+    except PayloadError as exc:
+        return record_bad_payload(
+            svc,
+            got,
+            job=job,
+            kind=spec.kind,
+            error=exc,
+            meta={"trade_date": day.isoformat()},
+            source=spec.source,
+        )
+    with svc.engine.begin() as conn:
         spec.write(conn, parsed.records, doc_id, spec.parser_version, available_at)
         dates_seen = [date.fromisoformat(d) for d in parsed.meta.get("dates_seen", [])]
         if parsed.records:
