@@ -14,6 +14,7 @@ from pydantic import ValidationError
 from sqlalchemy import Connection, Engine
 
 from gats.backtest.costs import CostModel, Fill
+from gats.config import Settings
 from gats.db import repo
 from gats.marketdata.bars import write_month
 from gats.marketdata.windows import EventWindow
@@ -34,7 +35,7 @@ from gats.research.reaction import (
 from gats.research.study import RegistrationError
 from gats.sources.models import AnnouncementRecord
 from gats.sources.upstox import Bar
-from gats.timeutil import ist_datetime
+from gats.timeutil import ist_datetime, utcnow
 from tests.test_event_study import VERSION, Market
 
 ROOT = Path(__file__).parents[1]
@@ -96,7 +97,7 @@ class TestConfig:
             verify_reaction(changed, PREREG)
 
     def test_amendment_1_order_wins_filed_in_market_hours(self, tmp_path: Path) -> None:
-        assert CFG.events.confirmatory == ["ORDER_WIN"] and CFG.events.exploratory == []
+        assert CFG.events.confirmatory == ["ORDER_WIN"]
         assert CFG.entry.confirmatory_strata == ["session"]
         assert CFG.entry.latency_percentile == 95
         with pytest.raises(ValidationError):  # a study must say which filings can pass
@@ -106,6 +107,27 @@ class TestConfig:
         copy.write_bytes(CONFIG.read_bytes())
         with pytest.raises(RegistrationError, match=r"records no SHA-256 for m5\.yaml"):
             verify_reaction(copy, PREREG)
+
+    def test_amendment_2_every_other_type_is_exploratory(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import yaml
+
+        from gats.cli import _study_types
+        from gats.research.taxonomy import NOISE, OTHER, Taxonomy, TaxonomyFile
+
+        others = CFG.events.exploratory
+        assert len(others) == 17 and "ORDER_WIN" not in others and others == sorted(others)
+        assert not {NOISE, OTHER} & set(CFG.event_types)
+        # Every type the taxonomy can give an NSE filing is in the study, once.
+        path = ROOT / "configs" / "event_taxonomy.yaml"
+        assert Taxonomy.load(path).version == CFG.taxonomy_version
+        spec = TaxonomyFile.model_validate(yaml.safe_load(path.read_text(encoding="utf-8")))
+        typed = {rule.type for rule in spec.rules} - {NOISE, OTHER, "LISTING"}
+        assert typed == set(CFG.event_types) and len(CFG.event_types) == 18
+        # Bars are fetched for exactly these types, the judged one first.
+        monkeypatch.chdir(ROOT)
+        assert _study_types() == ["ORDER_WIN", *others]
 
     def test_an_exit_is_minutes_or_a_named_moment(self) -> None:
         with pytest.raises(ValidationError):
@@ -267,11 +289,13 @@ def test_cost_fraction_is_the_verified_model_plus_slippage() -> None:
 # --- measured latency -------------------------------------------------------------------
 
 
-def live_filings(conn: Connection, store: RawStore, lags: Sequence[float]) -> None:
+def live_filings(
+    conn: Connection, store: RawStore, lags: Sequence[float], now: datetime = NOW
+) -> None:
     page = repo.save_raw(conn, store, b"p", kind="t", source="NSE", url="u",
-                         content_type=None, fetched_at=NOW)  # fmt: skip
+                         content_type=None, fetched_at=now)  # fmt: skip
     for n, lag in enumerate(lags):
-        shown = NOW - timedelta(days=2, minutes=n)
+        shown = now - timedelta(days=2, minutes=n)
         record = AnnouncementRecord(
             source="NSE", source_ann_id=f"live{n}", symbol="AAA", scrip_code=None, isin=None,
             company_name="A", category="x", subcategory=None, subject=None, details=None,
@@ -454,6 +478,110 @@ def test_only_filings_made_in_market_hours_can_pass() -> None:
     pooled_rule = quick.entry.model_copy(update={"confirmatory_strata": ["session", "overnight"]})
     _, pooled = decide(rows, quick.model_copy(update={"entry": pooled_rule}), ["ORDER_WIN"])  # type: ignore[arg-type]
     assert all(c.n == 400 and c.passes for c in pooled)
+
+
+def test_exploratory_types_are_reported_and_never_judged() -> None:
+    from gats.research.reaction import Delay
+    from gats.research.reaction_report import build_reaction_report, decide, explore
+
+    quick = CFG.model_copy(
+        update={"statistics": CFG.statistics.model_copy(update={"bootstrap_resamples": 500})}
+    )
+    rows = (
+        synthetic_rows("ORDER_WIN", 0.0, 400, 8)  # noise in the type that is judged
+        + synthetic_rows("RESULTS", 0.02, 400, 11)  # a large effect in an exploratory type
+    )
+    _, family = decide(rows, quick, ["ORDER_WIN"])  # type: ignore[arg-type]
+    assert [c.event_type for c in family] == ["ORDER_WIN"] * 5  # the family did not grow
+    assert not any(c.passes for c in family)
+    cell = explore(rows, quick, ["RESULTS"])[("RESULTS", "m5", "test")]  # type: ignore[arg-type]
+    assert cell.n == 200 and cell.mean_net > 0.015 and cell.ci_low > 0
+    assert not cell.passes and cell.reasons == []  # reported, not tested
+
+    text, judged = build_reaction_report(
+        rows, quick, digest=DIGEST, run_id="r3", experiment_id=9, scope=["ORDER_WIN"],  # type: ignore[arg-type]
+        delay=Delay(40.0, 900, 65.0), exploratory=["RESULTS"],
+        not_covered={"DIVIDEND": 0.4, "RATING_DOWN": None},
+        dropped={"unlinked": 3, "before_minute_data": 2},
+    )  # fmt: skip
+    assert "**G1b: no tradeable remainder found.**" in text  # the planted effect decides nothing
+    assert [c.event_type for c in judged] == ["ORDER_WIN"] * 5
+    assert "- Exploratory types (reported, never judged): RESULTS." in text
+    decision = text.split("## Decision table")[1].split("## Reaction curves")[0]
+    assert "| ORDER_WIN | m5 | 200 |" in decision and "RESULTS" not in decision
+    shown = text.split("## Exploratory types (reported only, never part of G1b)")[1]
+    assert "5 type-exit pairs are shown" in shown
+    line = next(row for row in shown.splitlines() if row.startswith("| RESULTS | m5 | 200 |"))
+    assert line.count("%") == 4 and line.endswith("| 0 | n/a |")  # mean, CI, before costs; no train
+    assert "DIVIDEND (bars for 40% of its events), RATING_DOWN (no events)." in shown
+    curves = text.split("## Reaction curves")[1].split("## Reported only")[0]
+    exits = [row.split(" | ")[1] for row in curves.splitlines() if row.startswith("| ORDER_WIN")]
+    assert exits[::2] == ["m5", "m15", "m30", "m60", "close"]  # the registered order
+    assert "Filings left out before any price was read: before_minute_data 2, unlinked 3." in text
+
+
+def test_the_command_judges_order_wins_and_only_reports_the_rest(
+    engine: Engine, store: RawStore, settings: Settings, command_dir: Path
+) -> None:
+    from sqlalchemy import select
+    from typer.testing import CliRunner
+
+    from gats.cli import app
+    from gats.db.schema import experiments
+
+    days = (date(2024, 1, 9), DAY, date(2024, 1, 11))
+    with engine.begin() as conn:
+        market = Market(conn, store, taxonomy_version=CFG.taxonomy_version)
+        market.list_stocks(["AAA"])
+        market.write_prices(["AAA"])
+        market.filing("AAA", "ORDER_WIN", at(11, 0))
+        market.filing("AAA", "RESULTS", at(13, 0))  # exploratory, and its bars are there
+        market.filing("AAA", "DIVIDEND", at(11, 0, date(2024, 3, 5)))  # exploratory, no bars
+        live_filings(conn, store, [float(n % 60) for n in range(500)], now=utcnow())
+    month = DAY.replace(day=1)
+    write_month(settings.bars_dir, KEY, month, [b for d in days for b in session_bars(KEY, d)])
+    write_month(
+        settings.bars_dir,
+        INDEX,
+        month,
+        [b for d in days for b in session_bars(INDEX, d, 1000.0, 0.0)],
+    )
+    report = command_dir / "M5.md"
+    args = ["research", "reaction", "--config", str(CONFIG), "--prereg", str(PREREG)]
+    args += ["--report", str(report)]
+    refused = CliRunner().invoke(app, [*args, "--scope", "RESULTS"])
+    assert refused.exit_code == 1 and "are not confirmatory types" in refused.output
+    assert not report.exists()
+
+    result = CliRunner().invoke(app, args)
+    assert result.exit_code == 0, result.output
+    assert "G1b: nothing passes" in result.output  # one event is no sample
+    assert "exploratory types reported: 1; not reported (bars or events missing): " in (
+        result.output
+    )
+    text = report.read_text(encoding="utf-8")
+    assert "- Scope (fixed before returns were computed): ORDER_WIN." in text
+    assert "- Exploratory types (reported, never judged): RESULTS." in text
+    decision = text.split("## Decision table")[1].split("## Reaction curves")[0]
+    assert "| ORDER_WIN | m5 | 1 |" in decision and "RESULTS" not in decision
+    shown = text.split("## Exploratory types (reported only, never part of G1b)")[1]
+    assert "| RESULTS | m5 | 1 |" in shown
+    assert "DIVIDEND (bars for 0% of its events)" in shown and "RATING_UP (no events)" in shown
+    assert "| ORDER_WIN | kept | 1 |" in text and "| RESULTS | kept | 1 |" in text
+    assert "| DIVIDEND |" not in text  # no bars: not computed at all
+    with engine.begin() as conn:
+        (run,) = conn.execute(select(experiments)).all()
+    assert (run.kind, run.status, run.holdout, run.params_hash) == (
+        "reaction_study",
+        "done",
+        True,
+        DIGEST,
+    )
+    assert run.params["scope"] == ["ORDER_WIN"] and run.params["exploratory"] == ["RESULTS"]
+    missing = run.params["not_covered"]
+    assert missing["DIVIDEND"] == 0.0 and missing["RATING_UP"] is None and len(missing) == 16
+    frames = list((settings.data_dir / "research" / CFG.study).glob("*/events.parquet"))
+    assert len(frames) == 1
 
 
 def test_the_saved_frame_keeps_every_column(tmp_path: Path) -> None:

@@ -112,6 +112,7 @@ class Market:
     planted: dict[tuple[str, date], float] = field(default_factory=dict)
     overrides: dict[tuple[str, date], dict[str, float]] = field(default_factory=dict)
     turnover_rs: dict[str, float] = field(default_factory=dict)
+    taxonomy_version: str = VERSION  # the version its filings are typed under
 
     def doc(self) -> str:
         self.n += 1
@@ -276,7 +277,7 @@ class Market:
         self.conn.execute(
             announcement_event_types.insert().values(
                 announcement_id=ann_id,
-                taxonomy_version=VERSION,
+                taxonomy_version=self.taxonomy_version,
                 event_type=event_type,
                 rule_no=0,
                 classified_at=at,

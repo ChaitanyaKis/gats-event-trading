@@ -8,6 +8,7 @@ tests/fixtures/real/ and are tested in test_real_fixtures.py.
 from __future__ import annotations
 
 import json
+import shutil
 from collections.abc import AsyncIterator, Callable, Iterator
 from datetime import UTC, datetime
 from pathlib import Path
@@ -22,6 +23,7 @@ from gats.ingest import Services
 from gats.net import PoliteClient
 from gats.rawstore import RawStore
 
+REPO = Path(__file__).parents[1]
 BSE_URL = "https://api.bseindia.com/BseIndiaAPI/api/AnnSubCategoryGetData/w"
 NSE_URL = "https://www.nseindia.com/api/corporate-announcements"
 NSE_HOME = "https://www.nseindia.com/"
@@ -58,6 +60,17 @@ def settings(tmp_path: Path) -> Settings:
     )
     s.ensure_dirs()
     return s
+
+
+@pytest.fixture
+def command_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """A working directory for running a research command: no ``.env``, the
+    data directory of the ``settings`` fixture, and the cost files that the
+    registered configs name by a path relative to where the command runs."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("GATS_DATA_DIR", str(tmp_path / "data"))
+    shutil.copytree(REPO / "configs" / "costs", tmp_path / "configs" / "costs")
+    return tmp_path
 
 
 @pytest.fixture

@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import math
 from collections import Counter
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date
 from typing import Any
@@ -46,6 +46,17 @@ def decide(
     return cells, evaluate_g1(cells, boots, view)
 
 
+def explore(
+    rows: list[dict[str, Any]], cfg: ReactionConfig, types: Sequence[str]
+) -> dict[tuple[str, str, str], Cell]:
+    """N, mean and interval of exploratory types, over the same filings the
+    gate reads. No test is run on them, so they cannot pass anything."""
+    view = GateView(_Scope([]), list(types), cfg.exits, cfg.statistics)
+    eligible = [r for r in rows if r.get("stratum") in cfg.entry.confirmatory_strata]
+    cells, _ = cells_for(eligible, view)
+    return cells
+
+
 def _pct(x: float) -> str:
     return "n/a" if x is None or math.isnan(x) else f"{x * 100:+.3f}%"
 
@@ -71,7 +82,14 @@ def build_reaction_report(
     median_rows: list[dict[str, Any]] | None = None,
     median_delay: Delay | None = None,
     m3_run_date: date | None = None,
+    exploratory: Sequence[str] = (),
+    not_covered: Mapping[str, float | None] | None = None,
+    dropped: Mapping[str, int] | None = None,
 ) -> tuple[str, list[Cell]]:
+    """``exploratory``: types reported and never judged. ``not_covered``:
+    exploratory types left out, with the share of their events that has
+    bars (None: the type has no events). ``dropped``: filings left out
+    before any price was read, by reason."""
     cells, family = decide(rows, cfg, scope)
     passed = [c for c in family if c.passes]
     verdict = (
@@ -88,6 +106,7 @@ def build_reaction_report(
         f"**G1b: {verdict}.**",
         "",
         f"- Scope (fixed before returns were computed): {', '.join(scope)}.",
+        f"- Exploratory types (reported, never judged): {', '.join(exploratory) or 'none'}.",
         f"- Filings that can pass the gate: {' and '.join(rule.confirmatory_strata)} "
         "(session = decided inside a regular session before the cutoff; "
         "overnight = entered at the next open).",
@@ -115,11 +134,15 @@ def build_reaction_report(
         "| Type | Exit | Period | N | Mean abnormal, before costs | Mean net | Hit rate | 95% CI |",
         "|---|---|---|---|---|---|---|---|",
     ]
-    for (event_type, exit_name, period), c in sorted(cells.items()):
-        lines.append(
-            f"| {event_type} | {exit_name} | {period} | {c.n} | {_pct(c.mean_gross)} | "
-            f"{_pct(c.mean_net)} | {_pct(c.hit_rate)} | {_pct(c.ci_low)} to {_pct(c.ci_high)} |"
-        )
+    for event_type in scope:
+        for x in cfg.exits:
+            for period in ("test", "train"):
+                c = cells[(event_type, x.name, period)]
+                lines.append(
+                    f"| {event_type} | {x.name} | {period} | {c.n} | {_pct(c.mean_gross)} | "
+                    f"{_pct(c.mean_net)} | {_pct(c.hit_rate)} | "
+                    f"{_pct(c.ci_low)} to {_pct(c.ci_high)} |"
+                )
     lines += ["", "## Reported only (test period, never part of the decision)", ""]
     lines += ["| Type | Measure | Exit | N | Mean net |", "|---|---|---|---|---|"]
 
@@ -175,9 +198,52 @@ def build_reaction_report(
                 f"| {event_type} | {x.name} | {n} | {_pct(event)} | {_pct(baseline)} | "
                 f"{_pct(event - baseline)} |"
             )
+    if exploratory or not_covered:
+        lines += [
+            "",
+            "## Exploratory types (reported only, never part of G1b)",
+            "",
+            "The same entry, exits, costs and filters as the decision table, for the same "
+            "kind of filing. No test is run on them. "
+            f"{len(exploratory) * len(cfg.exits)} type-exit pairs are shown, so some look good "
+            "by chance: a type becomes a confirmatory test only in a new pre-registration, "
+            "tested on forward or paper data.",
+            "",
+            "| Type | Exit | N | Mean net | 95% CI | Mean abnormal, before costs | "
+            "Train N | Train mean net |",
+            "|---|---|---|---|---|---|---|---|",
+        ]
+        explored = explore(rows, cfg, exploratory)
+        for event_type in exploratory:
+            for x in cfg.exits:
+                seen = explored[(event_type, x.name, "test")]
+                before = explored[(event_type, x.name, "train")]
+                lines.append(
+                    f"| {event_type} | {x.name} | {seen.n} | {_pct(seen.mean_net)} | "
+                    f"{_pct(seen.ci_low)} to {_pct(seen.ci_high)} | {_pct(seen.mean_gross)} | "
+                    f"{before.n} | {_pct(before.mean_net)} |"
+                )
+        if not_covered:
+            why = {
+                t: "no events" if share is None else f"bars for {share:.0%} of its events"
+                for t, share in sorted(not_covered.items())
+            }
+            lines += [
+                "",
+                "Not reported, for lack of bars or of events: "
+                + ", ".join(f"{t} ({reason})" for t, reason in why.items())
+                + ".",
+            ]
     reasons = Counter((r["event_type"], r.get("filter_reason") or "kept") for r in rows)
     lines += ["", "## Every event accounted for", ""]
     lines += ["| Type | Outcome | Events |", "|---|---|---|"]
     lines += [f"| {t} | {reason} | {n} |" for (t, reason), n in sorted(reasons.items())]
+    if dropped:
+        lines += [
+            "",
+            "Filings left out before any price was read: "
+            + ", ".join(f"{reason} {n}" for reason, n in sorted(dropped.items()))
+            + ".",
+        ]
     lines.append("")
     return "\n".join(lines), family

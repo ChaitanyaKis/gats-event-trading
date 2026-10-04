@@ -111,16 +111,13 @@ def test_the_registered_design(tmp_path: Path) -> None:
         registered_hash_for(PREREG, Path("something_else.yaml"))
 
 
-def test_the_command_refuses_a_changed_design_and_incomplete_data(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_the_command_refuses_a_changed_design_and_incomplete_data(command_dir: Path) -> None:
     from typer.testing import CliRunner
 
     from gats.cli import app
 
-    monkeypatch.setenv("GATS_DATA_DIR", str(tmp_path / "data"))
-    report = tmp_path / "report.md"
-    changed = tmp_path / "m5b_gap_fade.yaml"
+    report = command_dir / "report.md"
+    changed = command_dir / "m5b_gap_fade.yaml"
     changed.write_text(CONFIG.read_text("utf-8").replace("min_gap: 0.01", "min_gap: 0.02"), "utf-8")
     args = ["research", "gap-fade", "--prereg", str(PREREG), "--report", str(report)]
     result = CliRunner().invoke(app, [*args, "--config", str(changed)])

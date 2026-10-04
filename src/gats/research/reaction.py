@@ -361,8 +361,10 @@ def run_reaction_study(
     scope: Collection[str],
     costs: CostModel,
     index_key: str,
+    current_isins: Collection[str] = (),
 ) -> list[dict[str, Any]]:
-    """Every in-scope event with its filter reason or its returns."""
+    """Every event of the types in ``scope`` with its filter reason or its
+    returns. ``current_isins``: as in :func:`event_windows`."""
     cal = clock.calendar()
     resolver = clock.resolver()
     windows, _ = event_windows(
@@ -373,6 +375,7 @@ def run_reaction_study(
         end=cfg.data.end,
         source=cfg.data.source,
         minute_precision_delay_s=cfg.events.minute_precision_delay_s,
+        current_isins=current_isins,
         exclude_categories=cfg.events.exclude_categories,
     )
     index_cache: dict[date, list[Bar]] = {}

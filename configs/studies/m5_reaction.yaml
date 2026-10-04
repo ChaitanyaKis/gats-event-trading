@@ -5,9 +5,9 @@
 # the one recorded in the pre-registration; any change is a new study and a
 # new trial.
 #
-# Amended once, on 2026-10-04 (Amendment 1 in the pre-registration), after
-# gate G1 and before any one-minute bar was fetched: the scope and
-# `entry.confirmatory_strata`.
+# Amended twice on 2026-10-04 (Amendments 1 and 2 in the pre-registration),
+# after gate G1 and before any one-minute bar was fetched: the scope,
+# `entry.confirmatory_strata`, and the exploratory types.
 
 study: m5-intraday-reaction
 taxonomy_version: taxonomy-v1+6f16e1c9
@@ -20,10 +20,17 @@ data:
   test_start: 2024-01-01           # the holdout: used once, for G1b
 
 events:
-  # The scope after G1 (Amendment 1): the original thesis, order wins. M3's
-  # other four types (RATING_UP, BUYBACK, BONUS_SPLIT, PRESS_RELEASE) are out.
+  # The scope after G1 (Amendment 1): the original thesis, order wins. Only
+  # this type is judged at G1b: 1 type x 5 exits.
   confirmatory: [ORDER_WIN]
-  exploratory: []
+  # Amendment 2: every other event type of the taxonomy goes through the same
+  # pipeline and is REPORTED ONLY (N, mean, interval), never judged. Not here:
+  # AGM_NOISE (procedural filings), OTHER (untyped) and LISTING (typed from
+  # BSE filings only; this study reads NSE's).
+  exploratory: [ACQUISITION, BOARD_OUTCOME, BONUS_SPLIT, BUSINESS_UPDATE, BUYBACK,
+                DIVIDEND, FUNDRAISE, HOLDING_CHANGE, INSOLVENCY, MGMT_CHANGE,
+                PENALTY_LITIGATION, PLEDGE_CHANGE, PRESS_RELEASE, RATING_DOWN,
+                RATING_OTHER, RATING_UP, RESULTS]
   exclude_categories: ["Daily Buy Back of equity shares", "Closure of Buy Back",
                        "Post Buyback Public Announcement"]
   minute_precision_delay_s: 60

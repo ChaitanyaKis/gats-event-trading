@@ -2,10 +2,11 @@
 
 - **Study:** `m5-intraday-reaction` · **Registered:** 2026-10-03, before any
   one-minute bar was fetched or any intraday return computed. **Amended:**
-  2026-10-04 (Amendment 1, at the end), still before any bar or intraday
-  return. Where it differs from sections 1 to 10, the amendment rules.
+  2026-10-04 (Amendments 1 and 2, at the end), still before any bar or
+  intraday return. Where they differ from sections 1 to 10, the amendments
+  rule; where they differ from each other, the later one does.
 - **Config:** `configs/studies/m5_reaction.yaml`, SHA-256 (LF line endings)
-  `71bdb113ada825aac0c2b2d737ff1f80f69b6d98ebf2060cde00a12409045260`.
+  `92f74c45790b7176230343c43320ac530997e7ae0c148e7d25b669afe65f3766`.
   The engine refuses to run if the file's hash differs. Any change is a new
   study and a new trial.
 - **Taxonomy:** `taxonomy-v1+6f16e1c9`. **Costs:**
@@ -252,3 +253,49 @@ lag the index by the close. Consequences, both already in the design:
 Both arms are logged in `docs/research/trials.md` and, when run, in the
 experiment registry: arm A as the study's one confirmatory design, arm B as
 one exploratory design that reads a holdout again.
+
+## Amendment 2 (2026-10-04): every other event type, as exploratory
+
+The human's decision on arm A's scope, committed while no one-minute bar
+existed and no intraday return had been computed (arm B, already run, used
+daily prices only). The config hash at the top is the amended one; it
+replaces Amendment 1's (`71bdb113…5260`, never run).
+
+- **Confirmatory, unchanged:** ORDER_WIN filings made during market hours,
+  5 exits, 5 tests. Nothing below joins this family, so its correction is
+  the one already registered.
+- **Exploratory: the taxonomy's 17 other event types.** ACQUISITION,
+  BOARD_OUTCOME, BONUS_SPLIT, BUSINESS_UPDATE, BUYBACK, DIVIDEND, FUNDRAISE,
+  HOLDING_CHANGE, INSOLVENCY, MGMT_CHANGE, PENALTY_LITIGATION,
+  PLEDGE_CHANGE, PRESS_RELEASE, RATING_DOWN, RATING_OTHER, RATING_UP,
+  RESULTS. Amendment 1 had put M3's other four types out of the study;
+  they are back, as exploratory only.
+- **Same pipeline as arm A:** the same kind of filing (made during market
+  hours), entry after the measured delay, exits, costs and filters. For
+  each type and confirmatory exit the report gives N, the mean net abnormal
+  return and a 95% interval (bootstrap over dates), with the mean before
+  costs and the train period beside them. No p-value and no pass: they are
+  not tests and cannot decide G1b.
+- **Not run:** AGM_NOISE (procedural filings) and OTHER (untyped) are not
+  event types. LISTING is typed from BSE filings only, and this study reads
+  NSE's.
+- **Entries are long, as in arm A.** For bad-news types (a downgrade, a
+  penalty, insolvency, a pledge) the mean before costs shows the direction
+  of the reaction; trading it short would be a design of its own.
+- **85 looks** (17 types × 5 exits), so some will look good by chance.
+  **An exploratory type can become a confirmatory test only in a new
+  pre-registration, tested on forward or paper data**, never on this
+  history.
+- **Order size is not in arm A.** No amount-against-revenue filter or
+  feature enters this study. That needs M4's labelled extraction and has
+  its own pre-registration (`M4_prereg.md`, T4.7).
+- **Bars.** The run still needs bars for 95% of the confirmatory events. An
+  exploratory type is reported only if bars cover 95% of its own events;
+  otherwise the report names it and the share covered. G1b is decided by
+  the first run. A later run of this design is a reproduction (it may add
+  exploratory types whose bars have arrived since) and cannot change the
+  decision.
+- **Also reported:** how many filings were left out before any price was
+  read (not linked to a company, an excluded category, before minute data
+  exists, no single ISIN).
+- Logged in `docs/research/trials.md`.

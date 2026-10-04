@@ -4,8 +4,8 @@ Claude Code updates this after every task. Newest log entry first.
 
 ## Status
 
-- **Version:** 0.3.0 · **Schema:** v11 · **Milestone:** M5. **G1 decision (the human, 2026-10-04): option 1, run M5; do not start labelling.** M5's pre-registration has Amendment 1: arm A (confirmatory: order wins filed in market hours) and arm B (exploratory gap fade; run, **not supported**).
-- **Next up:** T5.1 → T5.2 → T5.3 arm A → G1b. All wait on the human: the Upstox token (item 6) for the bars, and the recorder left running (item 1) until it has 500 live NSE filings to measure the entry delay from (9 on 2026-10-04). Nothing else in the roadmap is unblocked. Documentation is frozen (CLAUDE.md, step 7).
+- **Version:** 0.3.0 · **Schema:** v11 · **Milestone:** M5. **G1 decision (the human, 2026-10-04): option 1, run M5; do not start labelling.** M5's pre-registration has Amendments 1 and 2: arm A judges order wins filed in market hours (5 tests) and reports the 17 other event types as exploratory; arm B (exploratory gap fade) was run: **not supported**.
+- **Next up:** waiting for the Upstox token (item 6). Then T5.1 (probe) → T5.2 (fetch bars) → T5.3 arm A → G1b, which also needs the recorder left running (item 1) until it has 500 live NSE filings to measure the entry delay from. Nothing else in the roadmap is unblocked. Documentation is frozen (CLAUDE.md, step 7).
 
 ## Waiting on the human (HUMAN)
 
@@ -70,9 +70,8 @@ are PowerShell, run from `C:\Projects\GATS`.
    T4.6 (`gats extract evaluate`: rules vs LLM vs cascade, `reports\M4_extraction.md`).
 
 6. **T5.1 Upstox Analytics Token: the next step for M5** (5 minutes; needs
-   an Upstox account). Arm A's scope is ORDER_WIN only (Claude's reading of
-   "the original thesis"); to test other filing types too, say so before the
-   bars are fetched. Afterwards the scope is closed.
+   an Upstox account). The scope is settled (Amendment 2, 2026-10-04): order
+   wins are judged, the 17 other event types are reported only.
    It is read-only (it cannot trade), valid for a year, and needs no daily
    login. Open https://account.upstox.com/developer/apps#analytics, go to
    the **Analytics** tab, click **Generate Token**, confirm, and copy the
@@ -84,8 +83,17 @@ are PowerShell, run from `C:\Projects\GATS`.
    Then type `/gats`. Claude probes the token, checks the cost model against
    Upstox's own brokerage calculator (T6.1), checks a day of bars against
    NSE's own end-of-day file, checks that a stock whose ISIN changed still has
-   its older bars, and then gives you one resumable command for the full
-   event-window fetch (`gats bars events`, about 1–2 h at Upstox's rate limit).
+   its older bars, and then gives you two resumable commands to run in a
+   second terminal, in this order (one request a second, Upstox allows 2,000
+   per 30 minutes):
+   ```powershell
+   cd C:\Projects\GATS
+   .venv\Scripts\gats bars events --type ORDER_WIN   # about 1 h: 3,673 instrument-months, what G1b needs
+   .venv\Scripts\gats bars events                    # about 23 h more: the 17 exploratory types, 87,649 in all, several GB
+   .venv\Scripts\gats bars coverage                  # per type; the run needs 95% for order wins
+   ```
+   Do not run them before Claude has probed the token: the candle format is
+   documented but not yet verified.
 
 7. ~~T4.7 Quarterly results (company revenue).~~ **Done 2026-10-04.** Claude
    ran it: 12,606 results files read since 2021, revenue for 689 companies;
@@ -142,7 +150,7 @@ are PowerShell, run from `C:\Projects\GATS`.
 - [x] M2 Reference data & entity resolution (0.2.0): T2.1 ✅ · T2.2 ✅ · T2.3 ✅ · T2.4 ✅ · T2.5 ✅ · T2.6 ✅ · T2.7 ✅ · T2.8 ✅ · T2.9 ✅
 - [x] M3 Event study (G1 kill test, 0.3.0): T3.0 ✅ · T3.1 ⚠️ (OTHER above target, see log) · T3.2 ✅ · T3.3 ✅ · T3.4 ✅ · T3.5 ✅ (**G1 not passed**; the human chose option 1: run M5)
 - [ ] M4 LLM extraction (infrastructure for ORDER_WIN; scope confirmed at G1): T4.1 ✅ · T4.2 ✅ · T4.3 ✅ · T4.4 ✅ · T4.5 ⏸ (code ✅; labels on hold by the G1 decision) · T4.6 ⏳ (code ✅; needs the labels) · T4.7 ⏳ (pre-registered; code ✅; revenue loaded; the run needs the labels, item 5)
-- [ ] M5 Intraday data & reaction curves (G1b): T5.1 ⏳ (code ✅; token: human, item 6) · T5.2 ⏳ (code ✅; the fetch needs the token) · T5.3 ⏳ (Amendment 1 registered; arm B run: not supported; arm A needs bars and 500 live filings) · T5.4 ⏳ (gate)
+- [ ] M5 Intraday data & reaction curves (G1b): T5.1 ⏳ (code ✅; token: human, item 6) · T5.2 ⏳ (code ✅; the fetch needs the token) · T5.3 ⏳ (Amendments 1 and 2 registered; arm B run: not supported; arm A needs bars and 500 live filings) · T5.4 ⏳ (gate)
 - [ ] M6 Backtester (G2): T6.1 ⏳ (model ✅; broker-calculator check needs the token, item 6) · T6.2 ✅ · T6.3 ✅ · T6.4 ✅ · T6.5 ✅ · T6.6 ✅ · T6.7 ✅ · T6.8 ⏳ (code ✅; the G2 run needs bars, events and T4.7's revenue feature)
 - [ ] M7 Paper trading (G3): T7.1 ⏳ (code ✅; full session over the mock exchange ✅; the real day: human, item 10) · T7.2 ⏳ [ASK] (measured by `gats paper status`; needs live data) · T7.3 ⏳ (code ✅; bot: human, item 9) · T7.4 ⏳ (scripts and docs ✅; VM: human, item 11) · T7.5 ⏳ (report code ✅; needs two months of paper)
 - [ ] M8 Live pilot (G4, human-only): T8.1 ✅ (off by default; order API documented, never called) · T8.2 ✅ · T8.3 ✅ · T8.4 ✅ · G4: the human's
@@ -158,6 +166,15 @@ are PowerShell, run from `C:\Projects\GATS`.
 ## Log
 
 - **2026-10-04:**
+  - **M5 Amendment 2 (the human's scope decision), before any bar exists.** Order wins
+    stay the only judged type (5 tests). The taxonomy's 17 other event types go through the
+    same pipeline as exploratory: N, mean and a 95% interval, no test, never part of G1b; a
+    type is promoted only by a new pre-registration on forward or paper data. Order size
+    stays out of arm A (M4's own pre-registration). `gats research reaction` now runs with
+    no options, reports an exploratory type only when its own bars are 95% complete, and
+    was run end to end on synthetic bars in a test. `gats bars events` fetches the
+    registered types by default: 87,649 instrument-months, about a day, against 3,673 for
+    order wins alone. Pushed; CI green on run 37196191966 (before this amendment).
   - **G1 decision and M5 Amendment 1.** The human chose option 1 (run M5, no labelling) and
     asked for two arms, both registered before anything intraday was computed (dcb697b).
     Arm A, confirmatory: ORDER_WIN filings made during market hours, entry after the

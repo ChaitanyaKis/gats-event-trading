@@ -186,6 +186,22 @@ class WindowCoverage:
         return self.covered / self.events if self.events else 0.0
 
 
+def coverage_by_type(
+    windows: Collection[EventWindow],
+    counts: Mapping[tuple[str, date], int],
+    index_key: str | None,
+) -> dict[str, WindowCoverage]:
+    """Coverage of each event type's own windows: a study that reports a
+    type only when its bars are there needs them apart."""
+    grouped: dict[str, list[EventWindow]] = defaultdict(list)
+    for window in windows:
+        grouped[window.event_type].append(window)
+    return {
+        event_type: window_coverage(members, counts, index_key)
+        for event_type, members in sorted(grouped.items())
+    }
+
+
 def window_coverage(
     windows: Collection[EventWindow],
     counts: Mapping[tuple[str, date], int],

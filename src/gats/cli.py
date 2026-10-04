@@ -1700,8 +1700,28 @@ def bars_show(
 
 EventTypes = Annotated[
     list[str] | None,
-    typer.Option("--type", help="Event type; repeat for more (default ORDER_WIN)."),
+    typer.Option(
+        "--type", help="Event type; repeat for more (default: the registered M5 study's types)."
+    ),
 ]
+_M5_CONFIG = Path("configs/studies/m5_reaction.yaml")
+_M5_PREREG = Path("docs/research/M5_prereg.md")
+# A run needs bars for this share of a type's events (M5 pre-registration, section 2).
+_MIN_BAR_COVERAGE = 0.95
+
+
+def _study_types() -> list[str]:
+    """The event types the registered M5 study reads, confirmatory first:
+    bars are fetched for these unless --type names others."""
+    from gats.research.reaction import verify_reaction
+    from gats.research.study import RegistrationError
+
+    try:
+        cfg, _ = verify_reaction(_M5_CONFIG, _M5_PREREG)
+    except (RegistrationError, OSError) as exc:
+        typer.echo(f"REFUSED: {exc}. Name the types with --type.")
+        raise typer.Exit(1) from exc
+    return cfg.event_types
 
 
 def _windows(settings: Settings, types: list[str] | None, start: str, end: str | None) -> Any:
@@ -1714,7 +1734,7 @@ def _windows(settings: Settings, types: list[str] | None, start: str, end: str |
     with engine.begin() as conn:
         return event_windows(
             AsOf(conn, utcnow()),
-            event_types=set(types or ["ORDER_WIN"]),
+            event_types=set(types or _study_types()),
             taxonomy_version=tax.version,
             start=_parse_day(start),
             end=_parse_day(end) if end else ist_today(),
@@ -1723,12 +1743,15 @@ def _windows(settings: Settings, types: list[str] | None, start: str, end: str |
 
 
 def _print_window_coverage(settings: Settings, windows: Any, index_key: str) -> None:
-    from gats.marketdata.windows import bars_per_day, window_coverage
+    from gats.marketdata.windows import bars_per_day, coverage_by_type, window_coverage
 
-    cov = window_coverage(windows, bars_per_day(settings.bars_dir), index_key)
+    counts = bars_per_day(settings.bars_dir)
+    cov = window_coverage(windows, counts, index_key)
     typer.echo(f"coverage: {cov.covered}/{cov.events} events ({cov.share:.1%}; target 95%)")
     for year, (covered, events) in sorted(cov.by_year.items()):
         typer.echo(f"  {year}: {covered}/{events}")
+    for event_type, of_type in coverage_by_type(windows, counts, index_key).items():
+        typer.echo(f"  {event_type}: {of_type.covered}/{of_type.events} ({of_type.share:.1%})")
     for window in cov.missing:
         typer.echo(
             f"  missing: #{window.announcement_id} {window.event_type} {window.instrument_key} "
@@ -2077,15 +2100,17 @@ def extract_evaluate(
 @research_app.command("reaction")
 def research_reaction(
     scope: Annotated[
-        list[str],
-        typer.Option("--scope", help="Type in scope after G1; repeat for more. Logged."),
-    ],
-    config: Annotated[Path, typer.Option(help="Study config (YAML).")] = Path(
-        "configs/studies/m5_reaction.yaml"
-    ),
+        list[str] | None,
+        typer.Option(
+            "--scope",
+            help="Confirmatory type to judge; repeat for more (default: all the study "
+            "registers). Logged.",
+        ),
+    ] = None,
+    config: Annotated[Path, typer.Option(help="Study config (YAML).")] = _M5_CONFIG,
     prereg: Annotated[
         Path, typer.Option(help="Pre-registration recording the config's hash.")
-    ] = Path("docs/research/M5_prereg.md"),
+    ] = _M5_PREREG,
     report: Annotated[Path, typer.Option(help="Where to write the report.")] = Path(
         "reports/M5_reaction_curves.md"
     ),
@@ -2093,14 +2118,20 @@ def research_reaction(
     """Run the pre-registered M5 intraday reaction study (gate G1b).
 
     Refuses unless the config is the registered one, bars cover the events,
-    and feed latency can be measured from live recording.
+    and feed latency can be measured from live recording. The study's
+    exploratory types are reported beside it and never judged.
     """
     from sqlalchemy import func
 
     from gats.backtest.costs import CostModel
     from gats.db.schema import experiments
     from gats.marketdata.upstox import current_isins
-    from gats.marketdata.windows import bars_per_day, event_windows, window_coverage
+    from gats.marketdata.windows import (
+        bars_per_day,
+        coverage_by_type,
+        event_windows,
+        window_coverage,
+    )
     from gats.research.event_study import write_parquet
     from gats.research.reaction import (
         NotReady,
@@ -2119,7 +2150,8 @@ def research_reaction(
     except RegistrationError as exc:
         typer.echo(f"REFUSED: {exc}")
         raise typer.Exit(1) from exc
-    outside = sorted(set(scope) - set(cfg.events.confirmatory))
+    judged = list(scope or cfg.events.confirmatory)
+    outside = sorted(set(judged) - set(cfg.events.confirmatory))
     if outside:
         typer.echo(f"REFUSED: {outside} are not confirmatory types of this study")
         raise typer.Exit(1)
@@ -2130,22 +2162,40 @@ def research_reaction(
     now = utcnow()
     with db.begin() as conn:
         clock = AsOf(conn, now)
-        windows, _ = event_windows(
+        isins = current_isins(conn)
+        windows, dropped = event_windows(
             clock,
-            event_types=set(scope),
+            event_types={*judged, *cfg.events.exploratory},
             taxonomy_version=cfg.taxonomy_version,
             start=cfg.data.start,
             end=cfg.data.end,
             source=cfg.data.source,
-            current_isins=current_isins(conn),
+            minute_precision_delay_s=cfg.events.minute_precision_delay_s,
+            current_isins=isins,
             exclude_categories=cfg.events.exclude_categories,
         )
-        coverage = window_coverage(windows, bars_per_day(settings.bars_dir), index_key)
+        counts = bars_per_day(settings.bars_dir)
+        coverage = window_coverage(
+            [w for w in windows if w.event_type in judged], counts, index_key
+        )
+        of_type = coverage_by_type(windows, counts, index_key)
+        # An exploratory type is reported only when its own bars are there.
+        explored = [
+            t
+            for t in cfg.events.exploratory
+            if t in of_type and of_type[t].share >= _MIN_BAR_COVERAGE
+        ]
+        not_covered = {
+            t: of_type[t].share if t in of_type else None  # None: no events of the type
+            for t in cfg.events.exploratory
+            if t not in explored
+        }
         try:
-            if coverage.share < 0.95:
+            if coverage.share < _MIN_BAR_COVERAGE:
                 raise NotReady(
                     f"bars cover {coverage.covered}/{coverage.events} in-scope events "
-                    f"({coverage.share:.1%}; the study needs 95%): run `gats bars events`"
+                    f"({coverage.share:.1%}; the study needs {_MIN_BAR_COVERAGE:.0%}): "
+                    "run `gats bars events`"
                 )
             delay = measured_delay(conn, cfg, now)
             median_delay = measured_delay(conn, cfg, now, percentile=50)
@@ -2162,19 +2212,26 @@ def research_reaction(
             kind="reaction_study",
             name=cfg.study,
             params_hash=digest,
-            params={"scope": sorted(scope), "delay_s": delay.total_s, "feed_s": delay.feed_s},
+            params={
+                "scope": sorted(judged),
+                "exploratory": explored,
+                "not_covered": not_covered,
+                "delay_s": delay.total_s,
+                "feed_s": delay.feed_s,
+            },
             data_start=cfg.data.start,
             data_end=cfg.data.end,
             holdout=True,  # the study reads its test period
         )
         with registered as run:
             rows = run_reaction_study(
-                clock, cfg, settings.bars_dir, delay_s=delay.total_s, scope=scope,
-                costs=costs, index_key=index_key,
+                clock, cfg, settings.bars_dir, delay_s=delay.total_s,
+                scope=[*judged, *explored], costs=costs, index_key=index_key,
+                current_isins=isins,
             )  # fmt: skip
             median_rows = run_reaction_study(
-                clock, cfg, settings.bars_dir, delay_s=median_delay.total_s, scope=scope,
-                costs=costs, index_key=index_key,
+                clock, cfg, settings.bars_dir, delay_s=median_delay.total_s, scope=judged,
+                costs=costs, index_key=index_key, current_isins=isins,
             )  # fmt: skip
             run.metrics = {"events": len(rows)}
     db.dispose()
@@ -2187,16 +2244,23 @@ def research_reaction(
         digest=digest,
         run_id=run_id,
         experiment_id=run.id,
-        scope=scope,
+        scope=judged,
         delay=delay,
         median_rows=median_rows,
         median_delay=median_delay,
         m3_run_date=to_ist(m3_run).date() if m3_run else None,
+        exploratory=explored,
+        not_covered=not_covered,
+        dropped=dropped,
     )
     report.parent.mkdir(parents=True, exist_ok=True)
     report.write_text(text, encoding="utf-8", newline="\n")
     passed = [f"{c.event_type}/{c.exit}" for c in family if c.passes]
     typer.echo(f"run {run_id}: {len(rows)} events -> {out / 'events.parquet'}")
+    typer.echo(
+        f"exploratory types reported: {len(explored)}; not reported (bars or events "
+        f"missing): {', '.join(sorted(not_covered)) or 'none'}"
+    )
     typer.echo(f"G1b: {'PASS ' + ', '.join(passed) if passed else 'nothing passes'} -> {report}")
 
 
