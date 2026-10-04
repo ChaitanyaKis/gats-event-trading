@@ -129,6 +129,7 @@ class AllowAll:
 
 
 _SESSION_OPEN, _SESSION_CLOSE = time(9, 15), time(15, 30)
+_RECENT_TRADES = 200  # closed trades shown to the risk rules (their window is smaller)
 
 
 @dataclass
@@ -145,6 +146,8 @@ class EngineState:
     day_start_equity: float = 0.0
     day: date | None = None
     session: bool = True  # does ``day`` have a regular session?
+    peak_equity: float = 0.0  # the highest equity seen: drawdown is measured from it
+    entry_costs: dict[str, float] = field(default_factory=dict)  # charges paid to get in
 
 
 @dataclass
@@ -189,9 +192,14 @@ class Engine:
         self.circuit_limits = circuit_limits
         self.listener = listener
         self.is_session = is_session
-        self.state = EngineState(cash=config.initial_cash, day_start_equity=config.initial_cash)
+        self.state = EngineState(
+            cash=config.initial_cash,
+            day_start_equity=config.initial_cash,
+            peak_equity=config.initial_cash,
+        )
         self.orders: list[Order] = []
         self.executions: list[Execution] = []
+        self.closed: list[float] = []  # net rupees of every closing fill, charges of both sides
         self.duplicates = 0
         self.equity: dict[date, float] = {}
 
@@ -290,6 +298,7 @@ class Engine:
                 st.cash += amount
                 st.unsettled.remove((usable_from, amount))
         st.day_start_equity = self._equity()
+        st.peak_equity = max(st.peak_equity, st.day_start_equity)
 
     def _equity(self) -> float:
         st = self.state
@@ -311,8 +320,10 @@ class Engine:
             if order.status == "working" and order.signal.side == "buy":
                 key = order.signal.instrument_key
                 buying[key] = buying.get(key, 0.0) + order.remaining * order.limit
+        equity = self._equity()
+        st.peak_equity = max(st.peak_equity, equity)
         return Exposure(
-            equity=self._equity(),
+            equity=equity,
             day_start_equity=st.day_start_equity,
             positions={
                 k: p.quantity * st.last_price.get(k, p.entry_price) for k, p in st.positions.items()
@@ -321,6 +332,8 @@ class Engine:
             last_data_at=dict(st.last_data_at),
             orders_this_second=this_second,
             in_session=st.session and _SESSION_OPEN <= to_ist(now).time() < _SESSION_CLOSE,
+            peak_equity=st.peak_equity,
+            recent_nets=tuple(self.closed[-_RECENT_TRADES:]),
         )
 
     def _end_of_day(self) -> None:
@@ -347,6 +360,7 @@ class Engine:
             if order.status == "working" and order.signal.product == "intraday" and sent_today:
                 order.status, order.note = "expired", "end of day"
         self.equity[st.day] = self._equity()
+        st.peak_equity = max(st.peak_equity, self.equity[st.day])
 
     @staticmethod
     def _close_time(day: date) -> datetime:
@@ -549,8 +563,14 @@ class Engine:
                 st.positions[key] = replace(held, quantity=total, entry_price=avg)
             if product == "delivery":
                 st.bought_on[key] = day
+            st.entry_costs[key] = st.entry_costs.get(key, 0.0) + charges.total
         else:
             assert held is not None
+            # What this sale made: its share of the entry's charges included.
+            entry_costs = st.entry_costs.get(key, 0.0) * quantity / held.quantity
+            st.entry_costs[key] = st.entry_costs.get(key, 0.0) - entry_costs
+            gross = (price - held.entry_price) * quantity
+            self.closed.append(gross - charges.total - entry_costs)
             proceeds = value - charges.total
             if product == "delivery":
                 st.unsettled.append((day + timedelta(days=1), proceeds))
@@ -562,6 +582,7 @@ class Engine:
             else:
                 del st.positions[key]
                 st.bought_on.pop(key, None)
+                st.entry_costs.pop(key, None)
         if order is not None:
             order.filled += quantity
             if order.remaining == 0:

@@ -7,6 +7,11 @@ wins, so a refusal always names one reason.
 
 Exits reduce risk, so they pass every rule except the exchange's order
 rate: halting exits because the day went badly would only make it worse.
+
+Two rules are kill criteria rather than limits (DESIGN, Gates): a fall from
+the equity peak beyond the drawdown limit, and a run of trades that lost
+beyond what chance explains. Either one disables new entries until a person
+has looked; nothing in the code switches a strategy back on by itself.
 Missing information fails closed: an unknown liquidity is a refusal, and so
 is unknown surveillance status unless the configuration allows it (old
 backtests have no surveillance history).
@@ -15,7 +20,8 @@ backtests have no surveillance history).
 from __future__ import annotations
 
 import hashlib
-from collections.abc import Callable
+import math
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from pathlib import Path
@@ -25,6 +31,7 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field
 
 from gats.strategy.base import Product, Side
+from gats.tdist import t_sf
 from gats.timeutil import to_ist
 
 Liquidity = Callable[[str, date], float | None]  # median daily turnover, rupees
@@ -45,6 +52,8 @@ class RiskLimits(BaseModel):
     block_flags: frozenset[str] = frozenset()
     unknown_flags: Literal["allow", "refuse"] = "refuse"
     max_orders_per_second: int = Field(ge=1, le=10)  # 10: the exchange threshold
+    expectancy_window_trades: int = Field(ge=5)
+    expectancy_confidence: float = Field(gt=0.5, lt=1)
     max_data_age_s: float = Field(gt=0)
     kill_switch_file: Path | None = None
 
@@ -75,6 +84,22 @@ class Exposure:
     last_data_at: dict[str, datetime] = field(default_factory=dict)
     orders_this_second: int = 0
     in_session: bool = True
+    peak_equity: float | None = None  # the highest equity so far (None: not tracked)
+    recent_nets: tuple[float, ...] = ()  # net rupees of the latest closed trades, oldest first
+
+
+def losing_beyond_chance(nets: Sequence[float], confidence: float) -> bool:
+    """Is the whole confidence interval of the mean result below zero?
+    (A one-sample t interval: trades are few, and their spread is unknown.)"""
+    n = len(nets)
+    mean = sum(nets) / n
+    if mean >= 0 or n < 2:
+        return False
+    spread = math.sqrt(sum((x - mean) ** 2 for x in nets) / (n - 1))
+    if spread == 0:
+        return True  # every trade lost the same amount
+    t = mean / (spread / math.sqrt(n))
+    return t_sf(-t, n - 1) < (1 - confidence) / 2
 
 
 class RiskEngine:
@@ -125,6 +150,22 @@ class RiskEngine:
         loss = account.day_start_equity - account.equity
         if loss >= lim.max_daily_loss_pct_equity * account.day_start_equity:
             return f"daily loss limit: down {loss:,.0f} today"
+        if account.peak_equity:
+            fallen = (account.peak_equity - account.equity) / account.peak_equity
+            if fallen >= lim.max_drawdown_pct_equity:
+                return (
+                    f"drawdown limit: {fallen:.1%} below the peak (limit "
+                    f"{lim.max_drawdown_pct_equity:.0%}); the strategy is disabled"
+                )
+        latest = account.recent_nets[-lim.expectancy_window_trades :]
+        if len(latest) >= lim.expectancy_window_trades and losing_beyond_chance(
+            latest, lim.expectancy_confidence
+        ):
+            mean = sum(latest) / len(latest)
+            return (
+                f"expectancy: the last {len(latest)} trades lost Rs {-mean:,.0f} each on "
+                "average, beyond chance; the strategy is disabled"
+            )
         names = set(account.positions) | set(account.buying)
         if key not in names and len(names) >= lim.max_open_positions:
             return f"open positions: {len(names)} already (limit {lim.max_open_positions})"

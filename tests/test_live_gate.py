@@ -45,7 +45,11 @@ ROOT = Path(__file__).parents[1]
 NOW = datetime(2026, 10, 5, 4, 30, tzinfo=UTC)  # 10:00 IST, a Monday
 KEY = "NSE_EQ|INE062A01020"
 CAPS = LiveCaps(
-    max_capital_rs=20_000, max_daily_loss_rs=500, max_position_rs=10_000, max_orders_per_day=6
+    max_capital_rs=20_000,
+    max_daily_loss_rs=500,
+    max_position_rs=10_000,
+    max_orders_per_day=6,
+    max_excess_slippage_bps=25,
 )
 DESIGN = "abcdef0123456789"
 
@@ -57,6 +61,7 @@ def test_the_shipped_caps_are_unset_so_live_cannot_start() -> None:
     spec = load_live(ROOT / "configs" / "live.yaml")
     assert spec.caps.unset() == [
         "max_capital_rs", "max_daily_loss_rs", "max_position_rs", "max_orders_per_day",
+        "max_excess_slippage_bps",
     ]  # fmt: skip
     assert spec.order_end_statuses == {"complete": "filled"} and CAPS.unset() == []
     assert CAPS.digest != CAPS.model_copy(update={"max_capital_rs": 20_001}).digest
@@ -86,7 +91,7 @@ def report(tmp_path: Path, verdict: str | None = "PASS") -> Path:
 
 
 def test_every_missing_piece_is_named(engine: Database, tmp_path: Path) -> None:
-    unset = LiveCaps(max_capital_rs=0, max_daily_loss_rs=0, max_position_rs=0, max_orders_per_day=0)
+    unset = CAPS.model_copy(update=dict.fromkeys(CAPS.model_dump(), 0))
     with engine.begin() as conn:
         found = gate.problems(
             conn, design_hash=DESIGN, caps=unset, report=tmp_path / "none.md", now=NOW
@@ -479,3 +484,14 @@ def test_tick_messages_say_what_happened() -> None:
     assert messages[0].startswith("[s1] SIGNAL: buy 10") and "limit 500.00" in messages[0]
     assert messages[1].startswith("[s1] REFUSED: buy 10") and "kill switch" in messages[1]
     assert messages[2] == "[s1] ERROR: NSE_EQ|X: HTTP 503"
+
+
+def test_switching_off_twice_for_the_same_reason_is_recorded_once(
+    oms: Oms, engine: Database
+) -> None:
+    oms.halt("reconcile", "A: we hold 0, the broker says 25")
+    oms.halt("reconcile", "A: we hold 0, the broker says 25")  # the next look, a minute later
+    oms.halt("reconcile", "A: we hold 0, the broker says 30")  # something new
+    with engine.begin() as conn:
+        details = conn.execute(select(live_breaches.c.detail).order_by(live_breaches.c.id)).all()
+    assert [d.detail[-2:] for d in details] == ["25", "30"] and oms.halted

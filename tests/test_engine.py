@@ -458,3 +458,24 @@ def test_an_after_hours_order_survives_a_weekend_with_a_calendar() -> None:
         Scripted(on_events=plan), COSTS, config, is_session=lambda day: day.weekday() < 5
     ).run(items)
     assert aware.orders[0].status == "filled" and buys(aware)[0].at == at(9, 15, monday)
+
+
+def test_each_closing_fill_is_valued_as_the_ledger_values_the_trade() -> None:
+    """The risk rules' kill criteria read these numbers; they must be the
+    ledger's, charges of both sides included."""
+    from gats.backtest.ledger import build_trades
+
+    day = bars(A, at(10, 0), [*flat(100, 3), *flat(98, 6)])
+    plan = {
+        (A, at(10, 0)): [buy(quantity=100)],
+        (A, at(10, 4)): [sell(when=at(10, 5))],
+    }
+    engine = live_engine(Scripted(plan))
+    for bar in day:
+        engine.step(bar)
+    result = engine.finish()
+    (trade,), still_open = build_trades(result.executions)
+    assert still_open == [] and engine.closed == [pytest.approx(trade.net)]
+    assert trade.net < -200  # two rupees a share on a hundred shares, and the charges
+    assert result.cash == pytest.approx(1_000_000.0 + engine.closed[0])
+    assert engine.state.peak_equity == 1_000_000.0 and engine.state.entry_costs == {}

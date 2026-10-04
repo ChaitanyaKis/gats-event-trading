@@ -14,7 +14,10 @@ caps:
   max_daily_loss_rs: 0     # today's loss at which live trading switches itself off
   max_position_rs: 0       # most rupees in one stock
   max_orders_per_day: 0    # real orders per day, entries and exits together
+  max_excess_slippage_bps: 0   # real fills this much worse than the model's, on average
+                               # (basis points), switch live trading off
 approval_valid_days: 30    # an approval expires; a pilot is reviewed, not left running
+slippage_window_orders: 10 # the latest filled real orders the slippage average is taken over
 # The broker's status words that end an order, mapped to ours (filled,
 # cancelled, rejected). Only "complete" is confirmed from Upstox's docs
 # (2026-10-04); the human adds the others from the broker's order-status

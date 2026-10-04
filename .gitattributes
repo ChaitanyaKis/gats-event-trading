@@ -7,3 +7,7 @@ labels/*.json text eol=lf
 
 # Golden test outputs are written with LF by the tests.
 tests/fixtures/golden/** text eol=lf
+
+# Run on Linux whatever machine they were checked out on.
+*.sh text eol=lf
+deploy/*.service text eol=lf

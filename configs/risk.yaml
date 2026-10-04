@@ -9,7 +9,7 @@ max_position_pct_equity: 0.10       # one position's notional, share of equity
 max_open_positions: 5               # held plus being bought
 max_daily_loss_pct_equity: 0.02     # today's realised + unrealised loss stops new entries
 max_drawdown_pct_equity: 0.10       # a strategy's peak-to-trough limit: G2 judges against
-                                    # it and production disables a strategy beyond it
+                                    # it, and beyond it the risk engine refuses new entries
 max_symbol_notional: 200000         # rupees in one stock, held plus being bought
 min_median_turnover_rs: 10000000    # Rs 1 crore a day (20-session median), as in M3
 block_flags: [ASM, GSM, T2T]        # surveillance lists and trade-for-trade series
@@ -19,4 +19,9 @@ unknown_flags: refuse               # no surveillance data: refuse (live); backt
 # second per exchange (NSE/INVG/67858, 2025-05-05); stay well under it.
 max_orders_per_second: 5
 max_data_age_s: 120                 # in market hours, older prices halt new entries
+# Kill criterion: a run of losing trades that chance does not explain. New
+# entries stop when the whole confidence interval of net rupees per trade,
+# over the latest closed trades, lies below zero. Exits are never blocked.
+expectancy_window_trades: 30
+expectancy_confidence: 0.95
 kill_switch_file: data/KILL         # if this file exists, no new entries

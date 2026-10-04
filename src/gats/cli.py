@@ -2531,6 +2531,10 @@ def gate_approve(config: LiveConfig = None) -> None:
     )
     typer.echo(f"  most in one stock: Rs {spec.caps.max_position_rs:,.0f}")
     typer.echo(f"  most real orders per day: {spec.caps.max_orders_per_day}")
+    typer.echo(
+        f"  switches off if real fills average {spec.caps.max_excess_slippage_bps:g} bps worse "
+        f"than the model over {spec.slippage_window_orders} orders"
+    )
     typer.echo(f"  valid for {spec.approval_valid_days} days")
     phrase = gate.confirmation(system.design_hash, spec.caps)
     typer.echo(f"To approve, type exactly:\n  {phrase}")
@@ -2620,7 +2624,9 @@ def live(
                 f"cap Rs {spec.caps.max_capital_rs:,.0f}. Ctrl+C stops it; creating "
                 f"{oms.kill_switch} stops new entries."
             )
-            await live_runtime.run_live(svc, runtime, oms, stop, alerter(svc))
+            await live_runtime.run_live(
+                svc, runtime, oms, stop, alerter(svc), spec.slippage_window_orders
+            )
         return 0
 
     try:

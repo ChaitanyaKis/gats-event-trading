@@ -19,10 +19,9 @@ from gats.research.stats import (
     cluster_bootstrap_means,
     clustered_mean,
     fcr_lower_bound,
-    regularized_beta,
-    t_sf,
 )
 from gats.research.study import load_study
+from gats.tdist import regularized_beta, t_sf
 from tests.test_study_guards import CONFIG, PREREG
 
 

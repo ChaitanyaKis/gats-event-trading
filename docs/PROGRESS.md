@@ -161,6 +161,21 @@ are PowerShell, run from `C:\Projects\GATS`.
 ## Log
 
 - **2026-10-04:**
+  - DESIGN's production kill criteria are now enforced, not only described. Found while
+    re-reading `configs/risk.yaml`: it said production disables a strategy beyond the
+    drawdown limit, and nothing did. In the risk engine (so in backtest, paper and live):
+    new entries stop when equity is `max_drawdown_pct_equity` below its peak, or when the
+    latest 30 closed trades lost beyond chance (one-sample t interval entirely below
+    zero). In the live loop: real fills averaging worse than the simulated ones by more
+    than `max_excess_slippage_bps` (a cap the human sets) switch trading off. Decision
+    logged: the rules apply in the backtest too, so one code path decides everywhere; a
+    strategy that trips one has failed G2 anyway.
+  - Real checks: `gats gate status` lists five reasons live may not start; the results
+    job, run once for two real companies, stored 83 filings and read 17 XBRL files
+    (Nila Infrastructures: Rs 304.31 crore trailing revenue; a company listed this year
+    correctly has none).
+  - Known gap, not built: recorded price bands are not yet fed to the engine as circuit
+    limits (it uses the flat-bar rule), and entries are not skipped near a band.
   - T7.1 loose ends closed. (1) A day without a session is not a trading day whatever the
     clock says: the engine takes the calendar, an order sent on a Saturday or a holiday
     waits for the next open, the risk rules do not call it mid-session, and the strategy

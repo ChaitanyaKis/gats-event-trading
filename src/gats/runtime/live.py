@@ -9,8 +9,11 @@ compared with paper order by order. The real book is the broker's:
 - real fills are followed and stored (``live_orders``);
 - a real order whose engine order ended without filling is cancelled;
 - what the fills add up to is reconciled with the broker's positions;
-- a cap breach, an order with no answer, or a book that does not match the
-  broker switches trading off (the kill switch) and alerts the human.
+- real fill prices are compared with the simulated ones the strategy was
+  judged with;
+- a cap breach, an order with no answer, a book that does not match the
+  broker, or fills worse than the model beyond the tolerance switches
+  trading off (the kill switch) and alerts the human.
 
 A pilot design, deliberately simple: when the real fill differs from the
 simulated one (a partial fill, no fill), the two books drift, and the
@@ -85,12 +88,18 @@ class LiveSession:
     orders, follow them, reconcile with the broker, and tell the human."""
 
     def __init__(
-        self, svc: Services, runtime: PaperRuntime, oms: Oms, alerts: Alerter | None = None
+        self,
+        svc: Services,
+        runtime: PaperRuntime,
+        oms: Oms,
+        alerts: Alerter | None = None,
+        slippage_window: int = 10,
     ) -> None:
         self.svc = svc
         self.runtime = runtime
         self.oms = oms
         self.alerts = alerts or NoAlerts()
+        self.slippage_window = slippage_window
         self._refreshed: datetime | None = None
         self._reconciled: datetime | None = None
         self._differing: list[str] = []  # what the last comparison disagreed on
@@ -98,6 +107,41 @@ class LiveSession:
 
     def _due(self, last: datetime | None, every_s: float, now: datetime) -> bool:
         return last is None or (now - last).total_seconds() >= every_s
+
+    def excess_slippage_bps(self) -> list[float]:
+        """For each real order that filled: how much worse its price was than
+        the simulated fill of the same engine order, in basis points
+        (positive = worse), oldest first."""
+        model: dict[int, tuple[float, int]] = {}
+        for fill in self.runtime.run.engine.executions:
+            value, shares = model.get(fill.order_id, (0.0, 0))
+            model[fill.order_id] = (value + fill.quantity * fill.price, shares + fill.quantity)
+        worse = []
+        for row in self.oms.filled():
+            value, shares = model.get(row.engine_order_id, (0.0, 0))
+            if not shares:
+                continue  # the simulation did not fill it: nothing to compare with
+            simulated = value / shares
+            ratio = (
+                row.average_price / simulated
+                if row.side == "buy"
+                else simulated / row.average_price
+            )
+            worse.append((ratio - 1) * 1e4)
+        return worse
+
+    def _check_slippage(self) -> None:
+        latest = self.excess_slippage_bps()[-self.slippage_window :]
+        if len(latest) < self.slippage_window:
+            return
+        mean = sum(latest) / len(latest)
+        tolerance = self.oms.caps.max_excess_slippage_bps
+        if mean > tolerance:
+            self.oms.halt(
+                "slippage",
+                f"real fills were {mean:.0f} bps worse than the model over the last "
+                f"{len(latest)} orders (tolerance {tolerance:g} bps)",
+            )
 
     async def after_tick(self, report: TickReport) -> None:
         name, oms = self.runtime.name, self.oms
@@ -113,10 +157,13 @@ class LiveSession:
         for message in tick_messages(name, [], report.fills, report.errors):
             await self.alerts.send(message)
         now = self.svc.clock()
+        heard = False  # of a real fill, in this pass
         if oms.open_orders() and self._due(self._refreshed, _REFRESH_S, now):
             self._refreshed = now
             await oms.cancel_expired(engine.orders)
-            await oms.refresh()
+            heard = bool(await oms.refresh())
+        if heard or report.fills:  # either side of the comparison has something new
+            self._check_slippage()
         if self._due(self._reconciled, _RECONCILE_S, now):
             self._reconciled = now
             # One disagreement can be a fill that landed between two
@@ -141,9 +188,10 @@ async def run_live(
     oms: Oms,
     stop: asyncio.Event,
     alerts: Alerter | None = None,
+    slippage_window: int = 10,
 ) -> None:
     """Tick, then mirror, follow and reconcile, until told to stop."""
-    session = LiveSession(svc, runtime, oms, alerts)
+    session = LiveSession(svc, runtime, oms, alerts, slippage_window)
     design = runtime.system.design_hash
     log.warning("LIVE run starting %s", kv(run=runtime.name, design=design))
     await session.alerts.send(f"[{runtime.name}] LIVE trading started (design {design})")

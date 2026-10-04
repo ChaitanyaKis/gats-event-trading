@@ -29,6 +29,10 @@ class LiveCaps(BaseModel):
     max_daily_loss_rs: float = Field(ge=0)
     max_position_rs: float = Field(ge=0)
     max_orders_per_day: int = Field(ge=0)
+    # How much worse than the simulated fills real fills may be, on average
+    # (basis points), before live trading switches itself off: the backtest
+    # and the paper run were judged with that simulation.
+    max_excess_slippage_bps: float = Field(ge=0)
 
     def unset(self) -> list[str]:
         """Caps still at 0: the human has not decided them."""
@@ -49,6 +53,7 @@ class LiveSpec(BaseModel):
     # The broker's status words that end an order -> our state. Only words
     # read in the broker's documentation belong here.
     order_end_statuses: dict[str, str] = Field(default_factory=lambda: {"complete": "filled"})
+    slippage_window_orders: int = Field(default=10, ge=1)  # filled orders the average is over
 
 
 def load_live(path: Path) -> LiveSpec:

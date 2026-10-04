@@ -43,7 +43,13 @@ start. It changes nothing and is safe to run.
      max_daily_loss_rs: <loss at which it switches itself off for the day>
      max_position_rs: <most rupees in one stock>
      max_orders_per_day: <real orders per day, entries and exits together>
+     max_excess_slippage_bps: <how much worse than the model real fills may average>
    ```
+
+   The last one is the pilot's real question. The backtest and the paper run
+   used simulated fills; this is how far real fills may fall short of them
+   (in basis points, averaged over `slippage_window_orders` filled orders)
+   before trading stops.
 
    Start with an amount whose complete loss would not matter to you. The
    pilot's purpose is to measure real fills and slippage against the paper
@@ -138,17 +144,39 @@ three causes:
   it again. Open the Upstox order book, look for the tag `gats-<run>-<n>`,
   and cancel or keep it by hand.
 - **`reconcile`**: the fills GATS stored do not add up to the positions the
-  broker reports. Trust the broker. Flatten or adopt the difference by hand.
+  broker reports (seen twice in a row, a minute apart). Trust the broker.
+  Flatten or adopt the difference by hand.
+- **`slippage`**: real fills averaged worse than the simulated ones by more
+  than your tolerance. This is the pilot's answer, not a malfunction: the
+  strategy's tested results assumed better fills than the market gives.
 
 To resume: understand the cause, make the broker's book and yours agree,
 delete `data\KILL`, and start `gats live` again.
 
+## When the strategy disables itself (paper and live alike)
+
+Two kill criteria live in the risk engine (`configs/risk.yaml`) and apply in
+the backtest, in paper trading and live. Neither creates the kill file; both
+show up as refused entries ("REFUSED ... drawdown limit" or "expectancy") in
+the alerts and in `gats paper status`. Exits are never refused.
+
+- **Drawdown**: equity fell `max_drawdown_pct_equity` below its peak.
+- **Expectancy**: the latest `expectancy_window_trades` closed trades lost
+  money beyond what chance explains (the whole confidence interval of the
+  average result is below zero).
+
+Nothing in the code switches the strategy back on, and it should not: these
+mean the edge that passed the gates is not showing up. A different limit or
+a changed strategy is a different design, which needs a new paper run and,
+for live trading, a new approval.
+
 ## Known limits of the pilot design
 
 - GATS keeps its simulated book as the decision maker and mirrors each
-  order to the broker. If a real order fills differently from the
-  simulation (a partial fill, no fill), the books drift, reconciliation
-  catches it, and trading stops. It does not try to repair the difference.
+  order to the broker. A real sell never exceeds what real fills hold, and
+  a real order whose simulated twin ended unfilled is cancelled. Beyond
+  that it does not repair differences: if the real book stops matching the
+  broker's, trading stops.
 - Exits are sent as limit orders at the protection band, like entries. In a
   fast fall a limit exit may not fill; the broker's own intraday square-off
   is the backstop for intraday positions.

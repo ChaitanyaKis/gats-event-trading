@@ -125,6 +125,9 @@ sells an hour later, and the day is closed.
 | `gats backtest run --start D --end D [--holdout --prereg FILE]` | Backtest a strategy over stored events and bars; writes the G2 report |
 | `gats paper run --name NAME` | Paper trading: the backtest engine fed live (filings from the recorder, 1-minute bars from Upstox). Simulated fills only; it cannot send an order. Runs until Ctrl+C, resumes by name |
 | `gats paper status [--name NAME]` | What each paper run has taken, ordered and filled, and its measured feed and hand-over latency |
+| `gats paper report --name NAME` | Gate G3: the paper run against a backtest of its own filings and bars, by the criteria in `configs/g3.yaml`; writes `reports/M7_paper.md` |
+| `gats gate status` | Every reason live trading may not start (read-only) |
+| `gats gate approve` / `gats gate revoke N` / `gats live --name NAME` | **Human only** (see `docs/RUNBOOK_LIVE.md`). Live trading is off, and stays impossible without caps you set and an approval you type at a terminal |
 | `gats probe upstox-intraday --symbol RELIANCE` | Today's candles as the paper runtime gets them: is the forming candle included, how late is a finished one |
 | `gats experiments list [--kind backtest]` | Research runs on record (logged before they start) and the number of distinct designs tried |
 | `gats inspect-bad [--limit N]` | Recent failed fetches and the payloads that failed to parse |

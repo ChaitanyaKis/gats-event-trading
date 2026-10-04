@@ -11,7 +11,13 @@ import yaml
 from pydantic import ValidationError
 
 from gats.backtest.engine import Engine, EngineConfig
-from gats.risk.engine import Exposure, OrderIntent, RiskEngine, RiskLimits
+from gats.risk.engine import (
+    Exposure,
+    OrderIntent,
+    RiskEngine,
+    RiskLimits,
+    losing_beyond_chance,
+)
 from gats.strategy.base import Signal
 from gats.timeutil import ist_datetime
 from tests.test_engine import COSTS, Scripted, at, bars, flat
@@ -190,3 +196,62 @@ def test_the_kill_switch_can_be_answered_by_the_runtime(tmp_path: Path) -> None:
     assert risk.check(order(), account()) is None
     assert answers == []
     assert not base.kill_switch_on()
+
+
+def test_a_fall_from_the_peak_beyond_the_limit_disables_entries(tmp_path: Path) -> None:
+    """A kill criterion, not a daily limit: it stays in force until a person
+    has looked (or the open positions recover)."""
+    risk = engine(tmp_path)  # the shipped limit: 10% below the peak
+    fallen = account(equity=899_000.0, day_start_equity=899_000.0, peak_equity=1_000_000.0)
+    refusal = risk.check(order(), fallen) or ""
+    assert "drawdown limit: 10.1% below the peak" in refusal and "disabled" in refusal
+    assert risk.check(order(closes=True), fallen) is None  # getting out stays possible
+    near = account(equity=905_000.0, day_start_equity=905_000.0, peak_equity=1_000_000.0)
+    assert risk.check(order(), near) is None
+    assert risk.check(order(), account()) is None  # a runtime that tracks no peak is not judged
+
+
+def test_losing_beyond_chance() -> None:
+    assert losing_beyond_chance([-50.0] * 30, 0.95)  # the same loss every time
+    assert losing_beyond_chance([-60.0, -40.0] * 15, 0.95)  # steady losses
+    assert not losing_beyond_chance([10.0] * 30, 0.95)
+    assert not losing_beyond_chance([-300.0, 290.0] * 15, 0.95)  # down a little, in wide swings
+    assert not losing_beyond_chance([-5.0], 0.95)  # one trade says nothing
+    # Textbook: 10 values, mean -1, sample sd 1.4907: t = -2.12 and t(0.975, 9) = 2.262.
+    borderline = [-3.0, -3.0, -2.0, -2.0, -1.0, -1.0, 0.0, 0.0, 1.0, 1.0]
+    assert not losing_beyond_chance(borderline, 0.95)
+    assert losing_beyond_chance(borderline, 0.90)  # t(0.95, 9) = 1.833
+
+
+def test_a_losing_run_disables_entries_once_there_is_a_full_window(tmp_path: Path) -> None:
+    risk = engine(tmp_path)  # the shipped window: the latest 30 closed trades
+    losing = account(recent_nets=tuple([-60.0, -40.0] * 15))
+    refusal = risk.check(order(), losing) or ""
+    assert "expectancy: the last 30 trades lost Rs 50 each" in refusal and "disabled" in refusal
+    assert risk.check(order(closes=True), losing) is None
+    assert risk.check(order(), account(recent_nets=tuple([-60.0, -40.0] * 14))) is None  # 28
+    assert risk.check(order(), account(recent_nets=tuple([-300.0, 290.0] * 15))) is None
+    recovered = account(recent_nets=tuple([-50.0] * 30 + [50.0] * 30))
+    assert risk.check(order(), recovered) is None  # only the latest window counts
+
+
+def test_the_engine_stops_entering_after_its_drawdown_limit(tmp_path: Path) -> None:
+    """Rs 91,000 of a stock that falls 2%: about 0.19% of equity gone. With a
+    0.15% limit the next entry is refused."""
+    day = bars(KEY, at(10, 0), [*flat(100, 3), *flat(98, 9)])
+    plan = {
+        (KEY, at(10, 0)): [Signal(KEY, "buy", "intraday", "first", at(10, 1), quantity=900)],
+        (KEY, at(10, 4)): [Signal(KEY, "sell", "intraday", "out", at(10, 5), closes=True)],
+        (KEY, at(10, 8)): [Signal(KEY, "buy", "intraday", "second", at(10, 9), quantity=900)],
+    }
+    cfg = EngineConfig(initial_cash=1_000_000.0, notional_per_trade=50_000.0)
+    tight = Engine(
+        Scripted(plan), COSTS, cfg, risk=engine(tmp_path, max_drawdown_pct_equity=0.0015)
+    )
+    result = tight.run(day)
+    first, out, second = result.orders
+    assert (first.status, out.status) == ("filled", "filled")
+    assert second.status == "rejected" and "drawdown limit: 0.2% below the peak" in second.note
+    assert tight.state.peak_equity == 1_000_000.0 and tight.closed[0] < -1_800
+    roomy = Engine(Scripted(plan), COSTS, cfg, risk=engine(tmp_path)).run(day)
+    assert roomy.orders[2].status != "rejected"  # the shipped 10% limit is far away

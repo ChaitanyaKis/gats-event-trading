@@ -134,9 +134,17 @@ class Oms:
     # --- switching off ------------------------------------------------------------
 
     def halt(self, kind: str, detail: str) -> None:
-        """Switch live trading off and record why. Idempotent."""
+        """Switch live trading off and record why. Saying the same thing
+        again changes nothing."""
         now = self.clock()
         with self.db.begin() as conn:
+            last = conn.execute(
+                select(live_breaches.c.kind, live_breaches.c.detail)
+                .order_by(live_breaches.c.id.desc())
+                .limit(1)
+            ).first()
+            if last is not None and (last.kind, last.detail) == (kind, detail):
+                return
             conn.execute(live_breaches.insert().values(at=now, kind=kind, detail=detail))
         self.kill_switch.parent.mkdir(parents=True, exist_ok=True)
         if not self.kill_switch.exists():
@@ -155,6 +163,12 @@ class Oms:
         return list(
             conn.execute(select(live_orders).where(live_orders.c.run_id == self.run_id)).all()
         )
+
+    def filled(self) -> list[Row[Any]]:
+        """Real orders that filled completely, oldest first."""
+        with self.db.begin() as conn:
+            rows = [r for r in self._rows(conn) if r.state == "filled" and r.average_price]
+        return sorted(rows, key=lambda r: (r.updated_at, r.engine_order_id))
 
     def held(self) -> dict[str, int]:
         """Net shares per stock that the stored fills add up to."""

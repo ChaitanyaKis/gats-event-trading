@@ -36,7 +36,11 @@ from tests.test_paper_runtime import (
 )
 
 CAPS = LiveCaps(
-    max_capital_rs=100_000, max_daily_loss_rs=5_000, max_position_rs=60_000, max_orders_per_day=10
+    max_capital_rs=100_000,
+    max_daily_loss_rs=5_000,
+    max_position_rs=60_000,
+    max_orders_per_day=10,
+    max_excess_slippage_bps=500,  # the fake broker fills at the limit: about 190 bps worse
 )
 
 
@@ -267,3 +271,28 @@ async def test_the_live_loop_keeps_ticking_after_a_failure_and_says_so(
     assert heard.messages[0].startswith("[pilot] LIVE trading started")
     assert any("live tick failed: RuntimeError: database is locked" in m for m in heard.messages)
     assert heard.messages[-1] == "[pilot] LIVE trading stopped"
+
+
+@respx.mock
+async def test_real_fills_much_worse_than_the_model_switch_trading_off(
+    svc: Services, clock: FakeClock, broker: Broker, system: System, tmp_path: Path
+) -> None:
+    """The fake broker fills at the limit, about 2% away from the price the
+    order was decided on, where the simulation fills within a few basis
+    points. Two such orders against a 50 bps tolerance: stop."""
+    mock_http(svc, broker)
+    tight = CAPS.model_copy(update={"max_excess_slippage_bps": 50})
+    session, _, heard = live(svc, system, tmp_path, tight)
+    session.slippage_window = 2
+    await session_until(session, clock, at(10, 0), at(10, 30), svc)
+    (entry_only,) = session.excess_slippage_bps()
+    assert 150 < entry_only < 250 and not session.oms.halted  # one order is not a pattern
+    await session_until(session, clock, at(10, 30, 15), at(11, 6), svc)
+    worse = session.excess_slippage_bps()
+    assert len(worse) == 2 and all(150 < w < 250 for w in worse)
+    assert session.oms.halted
+    with svc.engine.begin() as conn:
+        (stop,) = conn.execute(select(live_breaches)).all()
+    assert stop.kind == "slippage"
+    assert "bps worse than the model over the last 2 orders (tolerance 50 bps)" in stop.detail
+    assert sum("SWITCHED OFF" in m for m in heard.messages) == 1

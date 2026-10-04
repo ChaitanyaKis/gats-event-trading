@@ -3,6 +3,11 @@
 ## Unreleased
 Schema v11 (new tables only), upgraded automatically.
 
+- **Kill criteria:** the risk limits (`configs/risk.yaml`) now stop new
+  entries when equity falls `max_drawdown_pct_equity` below its peak or when
+  the latest `expectancy_window_trades` trades lost beyond chance. Live
+  trading also stops when real fills average worse than the model by more
+  than `max_excess_slippage_bps` (`configs/live.yaml`).
 - **Offline paper session:** `python scripts/paper_smoke.py` runs a whole
   paper-trading day against the mock exchange in a few seconds.
 - **Weekend and holiday filings** are now carried to the next open in
