@@ -22,7 +22,7 @@ from sqlalchemy import Connection, func, select
 
 from gats.db.schema import backfill_days, eod_prices, index_eod
 from gats.refdata.calendar import TradingCalendar
-from gats.research.study import StudyConfig
+from gats.research.study import DataSpec, StudyConfig
 from gats.timeutil import utcnow
 
 MIN_COVERAGE = 0.98
@@ -54,36 +54,48 @@ class Readiness:
 
 
 def data_readiness(conn: Connection, cfg: StudyConfig, cal: TradingCalendar) -> Readiness:
-    expected = cal.trading_days(cfg.data.start, cfg.data.end, include_special=False)
+    return window_readiness(conn, cfg.data, cal, index=cfg.benchmark.index)
+
+
+def window_readiness(
+    conn: Connection, data: DataSpec, cal: TradingCalendar, *, index: str | None = None
+) -> Readiness:
+    """How complete prices and filings are over a study's window. ``index``:
+    the benchmark whose closes the study needs (None: it uses no index)."""
+    expected = cal.trading_days(data.start, data.end, include_special=False)
     eod_days = set(
         conn.execute(
             select(eod_prices.c.trade_date)
-            .where(eod_prices.c.trade_date.between(cfg.data.start, cfg.data.end))
+            .where(eod_prices.c.trade_date.between(data.start, data.end))
             .distinct()
         ).scalars()
     )
-    index_days = set(
-        conn.execute(
-            select(index_eod.c.trade_date)
-            .where(
-                index_eod.c.trade_date.between(cfg.data.start, cfg.data.end),
-                index_eod.c.index_name == cfg.benchmark.index,
-            )
-            .distinct()
-        ).scalars()
+    index_days = (
+        set(expected)
+        if index is None
+        else set(
+            conn.execute(
+                select(index_eod.c.trade_date)
+                .where(
+                    index_eod.c.trade_date.between(data.start, data.end),
+                    index_eod.c.index_name == index,
+                )
+                .distinct()
+            ).scalars()
+        )
     )
-    calendar_days = (cfg.data.end - cfg.data.start).days + 1
+    calendar_days = (data.end - data.start).days + 1
     complete = set(
         conn.execute(
             select(backfill_days.c.day).where(
-                backfill_days.c.source == cfg.data.source,
+                backfill_days.c.source == data.source,
                 backfill_days.c.status == "complete",
-                backfill_days.c.day.between(cfg.data.start, cfg.data.end),
+                backfill_days.c.day.between(data.start, data.end),
             )
         ).scalars()
     )
     n = len(expected) or 1
-    all_days = [date.fromordinal(cfg.data.start.toordinal() + k) for k in range(calendar_days)]
+    all_days = [date.fromordinal(data.start.toordinal() + k) for k in range(calendar_days)]
     return Readiness(
         sessions=len(expected),
         eod_share=sum(d in eod_days for d in expected) / n,

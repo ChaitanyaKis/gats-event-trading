@@ -2735,14 +2735,17 @@ def research_gap_fade(
     """Run M5's exploratory arm B: the short at the open after a filing that
     gapped the stock up, against matched gap-ups with no filing. Daily data."""
     from gats.backtest.costs import CostModel
+    from gats.db.schema import experiments
+    from gats.research.event_study import write_parquet
     from gats.research.gap_fade import (
         build_gap_fade_report,
+        control_records,
         run_gap_fade,
         supported,
         verify_gap_fade,
     )
     from gats.research.registry import experiment
-    from gats.research.runs import stamp
+    from gats.research.runs import database_fingerprint, stamp, window_readiness
     from gats.research.study import RegistrationError
 
     settings = _settings()
@@ -2754,6 +2757,26 @@ def research_gap_fade(
     costs = CostModel.load(cfg.costs.cost_file)
     db = make_engine(settings.resolved_db_url)
     init_db(db)
+    with db.begin() as conn:
+        readiness = window_readiness(conn, cfg.data, AsOf(conn, utcnow()).calendar())
+        earlier = conn.execute(
+            select(experiments.c.id).where(
+                experiments.c.params_hash == digest, experiments.c.status == "done"
+            )
+        ).all()
+        fingerprint = {k: str(v) for k, v in database_fingerprint(conn).items()}
+    if not readiness.ready:
+        typer.echo("REFUSED: the data is not complete enough to spend the holdout on.")
+        for problem in readiness.problems():
+            typer.echo(f"  {problem}")
+        db.dispose()
+        raise typer.Exit(1)
+    if earlier:
+        typer.echo(
+            f"WARNING: this exact design was already run {len(earlier)} time(s) "
+            f"(first: experiment #{earlier[0].id}). This is a reproduction; nothing may be "
+            "tuned on its results."
+        )
     registered = experiment(
         db,
         kind="event_study",
@@ -2768,13 +2791,22 @@ def research_gap_fade(
         events, controls = run_gap_fade(AsOf(conn, utcnow()), cfg, costs)
         ok, missing = supported(events, cfg)
         kept = [e for e in events if e["filter_reason"] is None]
-        run.metrics = {"events": len(kept), "cells": len(controls), "supported": ok}
+        run.metrics = {
+            "events": len(kept),
+            "cells": len(controls),
+            "supported": ok,
+            **fingerprint,
+        }
     db.dispose()
     run_id = stamp()
+    out = settings.data_dir / "research" / cfg.study / run_id
+    write_parquet(events, out / "events.parquet")
+    write_parquet(control_records(controls), out / "controls.parquet")
     text = build_gap_fade_report(events, cfg, digest=digest, run_id=run_id, experiment_id=run.id)
     report.parent.mkdir(parents=True, exist_ok=True)
     report.write_text(text, encoding="utf-8", newline="\n")
     typer.echo(f"run {run_id}: {len(kept)} gap-ups after a filing, {len(controls)} matched cells")
+    typer.echo(f"frames -> {out}")
     typer.echo(
         "exploratory result: "
         + (

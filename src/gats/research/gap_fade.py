@@ -208,11 +208,13 @@ def session_day(cal: TradingCalendar, moment: datetime) -> tuple[date, bool] | N
 # --- the study --------------------------------------------------------------------
 
 
+Cell = tuple[date, int, int]  # (date, liquidity bucket, gap bin)
+
+
 def run_gap_fade(
     clock: AsOf, cfg: GapFadeConfig, costs: CostModel
-) -> tuple[list[dict[str, Any]], dict[tuple[date, int, int], list[float]]]:
-    """(one row per filing, the matched controls' short returns by cell).
-    A cell is (date, liquidity bucket, gap bin)."""
+) -> tuple[list[dict[str, Any]], dict[Cell, list[GapDay]]]:
+    """(one row per filing, the matched control stock-days by cell)."""
     cal, resolver, adjuster = clock.calendar(), clock.resolver(), clock.return_adjuster()
     bands = {symbol: band_fraction(band) for symbol, band in clock.latest_bands(cfg.filters.series)}
     start = ist_datetime(cfg.data.start, time())
@@ -309,7 +311,7 @@ def run_gap_fade(
     wanted = {
         (e["entry_date"], e["bucket"], e["bin"]) for e in events if e["filter_reason"] is None
     }
-    controls: dict[tuple[date, int, int], list[float]] = defaultdict(list)
+    controls: dict[Cell, list[GapDay]] = defaultdict(list)
     for day in sorted({cell[0] for cell in wanted}):
         for gap_day in gap_ups[day]:
             cell = (day, gap_day.bucket, gap_day.bin)
@@ -318,15 +320,33 @@ def run_gap_fade(
             security = resolver.resolve("nse_symbol", gap_day.symbol, day)
             if security is None or (security, day) in filed:
                 continue  # unknown company, or it filed something: not a control
-            controls[cell].append(gap_day.short_gross)
+            controls[cell].append(gap_day)
     for event in events:
         if event["filter_reason"] is None:
             matched = controls.get((event["entry_date"], event["bucket"], event["bin"]), [])
             event["controls"] = len(matched)
             if matched:
-                event["control_gross"] = sum(matched) / len(matched)
+                event["control_gross"] = sum(g.short_gross for g in matched) / len(matched)
                 event["effect"] = event["short_gross"] - event["control_gross"]
     return events, dict(controls)
+
+
+def control_records(controls: dict[Cell, list[GapDay]]) -> list[dict[str, Any]]:
+    """The control stock-days as rows, so a run can be checked by hand."""
+    return [
+        {
+            "entry_date": day,
+            "bucket": bucket,
+            "bin": gap_bin,
+            "symbol": g.symbol,
+            "gap": g.gap,
+            "open": g.open,
+            "close": g.close,
+            "short_gross": g.short_gross,
+        }
+        for (day, bucket, gap_bin), members in sorted(controls.items())
+        for g in members
+    ]
 
 
 def _period(cfg: GapFadeConfig, day: date) -> str | None:

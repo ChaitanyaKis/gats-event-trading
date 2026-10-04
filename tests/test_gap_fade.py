@@ -21,6 +21,7 @@ from gats.research.gap_fade import (
     GapDay,
     band_fraction,
     build_gap_fade_report,
+    control_records,
     run_gap_fade,
     short_cost,
     supported,
@@ -83,9 +84,10 @@ def prices(
 
 
 def study(conn: Connection) -> tuple[dict[str, dict[str, Any]], dict[Any, list[float]]]:
-    """(the study's events by symbol, its controls by cell)."""
+    """(the study's events by symbol, its controls' short returns by cell)."""
     cfg = CFG.model_copy(update={"taxonomy_version": VERSION})
-    events, controls = run_gap_fade(AsOf(conn, NOW), cfg, COSTS)
+    events, found = run_gap_fade(AsOf(conn, NOW), cfg, COSTS)
+    controls = {cell: [g.short_gross for g in members] for cell, members in found.items()}
     resolver = AsOf(conn, NOW).resolver()
     by_symbol = {}
     for event in events:
@@ -109,6 +111,26 @@ def test_the_registered_design(tmp_path: Path) -> None:
         registered_hash_for(PREREG, Path("something_else.yaml"))
 
 
+def test_the_command_refuses_a_changed_design_and_incomplete_data(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from typer.testing import CliRunner
+
+    from gats.cli import app
+
+    monkeypatch.setenv("GATS_DATA_DIR", str(tmp_path / "data"))
+    report = tmp_path / "report.md"
+    changed = tmp_path / "m5b_gap_fade.yaml"
+    changed.write_text(CONFIG.read_text("utf-8").replace("min_gap: 0.01", "min_gap: 0.02"), "utf-8")
+    args = ["research", "gap-fade", "--prereg", str(PREREG), "--report", str(report)]
+    result = CliRunner().invoke(app, [*args, "--config", str(changed)])
+    assert result.exit_code == 1 and "not the pre-registered config" in result.stdout
+    # The registered design, on an empty database: no holdout is spent on it.
+    result = CliRunner().invoke(app, [*args, "--config", str(CONFIG)])
+    assert result.exit_code == 1 and "REFUSED: the data is not complete" in result.stdout
+    assert not report.exists()
+
+
 def test_a_filing_gap_is_measured_against_gaps_without_a_filing(
     engine: Engine, store: RawStore
 ) -> None:
@@ -130,6 +152,8 @@ def test_a_filing_gap_is_measured_against_gaps_without_a_filing(
         prices(market, "III", gap=0.035, fade=0.02, flat=True)  # locked: cannot be traded
         market.filing("III", "ORDER_WIN", OVERNIGHT)
         events, controls = study(conn)
+        cfg = CFG.model_copy(update={"taxonomy_version": VERSION})
+        saved = control_records(run_gap_fade(AsOf(conn, NOW), cfg, COSTS)[1])
 
     assert set(events) == {"AAA", "GGG", "HHH", "III"}  # the order wins, and only they
     event = events["AAA"]
@@ -140,6 +164,12 @@ def test_a_filing_gap_is_measured_against_gaps_without_a_filing(
     # DDD and HHH filed around the session; EEE and FFF are in other cells.
     assert controls == {(DAY, 0, 2): [pytest.approx(0.005), pytest.approx(0.007)]}
     assert event["controls"] == 2 and event["control_gross"] == pytest.approx(0.006)
+    # The frame a run saves names each control, so it can be checked by hand.
+    assert [(r["symbol"], r["entry_date"], r["bin"]) for r in saved] == [
+        ("BBB", DAY, 2),
+        ("CCC", DAY, 2),
+    ]
+    assert saved[0]["short_gross"] == pytest.approx(0.005) and saved[0]["open"] == 104.0
     assert event["effect"] == pytest.approx(0.014)  # the filing's own share of the fade
     fee = short_cost(COSTS, GapDay("AAA", DAY, 0.035, 0, 2, 103.5, 103.5 * 0.98), CFG)
     assert 0.0015 < fee < 0.004 and event["short_net"] == pytest.approx(0.02 - fee)
@@ -228,9 +258,9 @@ def test_nothing_the_clock_has_not_seen_is_used(engine: Engine, store: RawStore)
         market.filing("CCC", "ORDER_WIN", OVERNIGHT)
 
         before_prices = AsOf(conn, datetime(2024, 2, 20, tzinfo=UTC))
-        events, controls = run_gap_fade(before_prices, cfg, COSTS)
+        events, found = run_gap_fade(before_prices, cfg, COSTS)
         assert [e["filter_reason"] for e in events] == ["no_price", "no_price"]
-        assert controls == {}
+        assert found == {}
         before_filing = AsOf(conn, datetime(2024, 2, 1, tzinfo=UTC))
         assert run_gap_fade(before_filing, cfg, COSTS) == ([], {})
         events, controls = study(conn)
