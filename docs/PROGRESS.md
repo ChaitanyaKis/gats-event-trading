@@ -4,16 +4,18 @@ Claude Code updates this after every task. Newest log entry first.
 
 ## Status
 
-- **Version:** 0.3.0 · **Schema:** v11 · **Milestone:** M3 complete; **gate G1 NOT passed: waiting for the human's decision** (`docs/research/M3_decision.md`)
-- **Next up:** nothing until the human decides at G1 (options 1 to 4 in the decision note; Claude recommends option 1, the intraday test). If option 1: Upstox token (item 6) -> probe candles and costs, fetch bars; recorder latency (item 1) -> T5.3 and G1b. The results backfill (item 7) was started on 2026-10-04 and is resumable; rerun it only if the human continues with S1. Waiting on the human: G1 decision, recorder restart (1), labels (5, only if S1 continues), Upstox token (6), items 8 to 12
+- **Version:** 0.3.0 · **Schema:** v11 · **Milestone:** M5. **G1 decision (the human, 2026-10-04): option 1, run M5; do not start labelling.** M5's pre-registration has Amendment 1: arm A (confirmatory: order wins filed in market hours) and arm B (exploratory gap fade; run, **not supported**).
+- **Next up:** T5.1 → T5.2 → T5.3 arm A → G1b. All wait on the human: the Upstox token (item 6) for the bars, and the recorder left running (item 1) until it has 500 live NSE filings to measure the entry delay from (9 on 2026-10-04). Nothing else in the roadmap is unblocked. Documentation is frozen (CLAUDE.md, step 7).
 
 ## Waiting on the human (HUMAN)
 
 Do these in order; each is independent of Claude's ongoing work. Commands
 are PowerShell, run from `C:\Projects\GATS`.
 
-1. **Start the recorder** in its own terminal and leave it running (PC
-   awake: Settings → System → Power → Screen and sleep → Never when plugged in):
+1. **Keep the recorder running** (it is, since 2026-10-04) in its own
+   terminal (PC awake: Settings → System → Power → Screen and sleep → Never
+   when plugged in). Arm A of M5 enters after the delay this recorder
+   measures, and needs 500 live NSE filings: a few trading days. If it stops:
    `powershell -ExecutionPolicy Bypass -File scripts\run_recorder.ps1`
    Check it any time with `.venv\Scripts\gats status`.
 2. ~~T1.6 GitHub + CI.~~ **Done 2026-10-04.** Public repository
@@ -54,7 +56,8 @@ are PowerShell, run from `C:\Projects\GATS`.
    `docs/research/dedupe_v1_review.md` (each shows both exchanges' text) and
    tell Claude if any verdict looks wrong.
 
-5. **T4.5 Label at least 300 order wins** (about 30 s each, any number of
+5. **ON HOLD by the G1 decision: do not start.** Worth the hours only if
+   G1b passes. T4.5 Label at least 300 order wins (about 30 s each, any number of
    sittings). Ollama must be running: the LLM proposes half of the items.
    Read `labels\README.md` first (one page).
    ```powershell
@@ -66,7 +69,10 @@ are PowerShell, run from `C:\Projects\GATS`.
    Then type `/gats`: Claude commits `labels\order_win_v1.jsonl` and runs
    T4.6 (`gats extract evaluate`: rules vs LLM vs cascade, `reports\M4_extraction.md`).
 
-6. **T5.1 Upstox Analytics Token** (5 minutes; needs an Upstox account).
+6. **T5.1 Upstox Analytics Token: the next step for M5** (5 minutes; needs
+   an Upstox account). Arm A's scope is ORDER_WIN only (Claude's reading of
+   "the original thesis"); to test other filing types too, say so before the
+   bars are fetched. Afterwards the scope is closed.
    It is read-only (it cannot trade), valid for a year, and needs no daily
    login. Open https://account.upstox.com/developer/apps#analytics, go to
    the **Analytics** tab, click **Generate Token**, confirm, and copy the
@@ -90,7 +96,9 @@ are PowerShell, run from `C:\Projects\GATS`.
    cd C:\Projects\GATS
    .venv\Scripts\gats backfill results --type ORDER_WIN --since 2021-01-01 --limit 20000
    ```
-   Rerun the same command until it prints `XBRL: 0 read`.
+   Rerun the same command until it prints `XBRL: 0 read`. (Claude's run of
+   2026-10-04 had read 9,902 of 30,530 files at 09:20 UTC and continues in
+   the background; if the PC restarts, rerun it.)
 
 8. **T7.5 Confirm the G3 criteria BEFORE paper trading starts.** Open
    `configs/g3.yaml` (five numbers Claude proposed: 60 days, 30 trades,
@@ -139,9 +147,9 @@ are PowerShell, run from `C:\Projects\GATS`.
 - [x] M1 core recorder (0.1.0 → 0.1.2)
 - [x] M1 finishing: T1.1 ✅ · T1.2 ✅ · T1.3 ✅ · T1.4 ✅ · T1.5 ✅ · T1.6 ✅
 - [x] M2 Reference data & entity resolution (0.2.0): T2.1 ✅ · T2.2 ✅ · T2.3 ✅ · T2.4 ✅ · T2.5 ✅ · T2.6 ✅ · T2.7 ✅ · T2.8 ✅ · T2.9 ✅
-- [x] M3 Event study (G1 kill test, 0.3.0): T3.0 ✅ · T3.1 ⚠️ (OTHER above target, see log) · T3.2 ✅ · T3.3 ✅ · T3.4 ✅ · T3.5 ✅ (decision note written; **G1 not passed**, the human decides)
-- [ ] M4 LLM extraction (infrastructure for ORDER_WIN; scope confirmed at G1): T4.1 ✅ · T4.2 ✅ · T4.3 ✅ · T4.4 ✅ · T4.5 ⏳ (code ✅; labels: human) · T4.6 ⏳ (code ✅; needs the labels) · T4.7 ⏳ (pre-registered; code ✅; the run needs items 3, 5 and 7)
-- [ ] M5 Intraday data & reaction curves (G1b): T5.1 ⏳ (code ✅; token: human, item 6) · T5.2 ⏳ (code ✅; the fetch needs the token) · T5.3 ⏳ (pre-registered; code ✅; the run needs bars and recorder latency) · T5.4 ⏳ (gate)
+- [x] M3 Event study (G1 kill test, 0.3.0): T3.0 ✅ · T3.1 ⚠️ (OTHER above target, see log) · T3.2 ✅ · T3.3 ✅ · T3.4 ✅ · T3.5 ✅ (**G1 not passed**; the human chose option 1: run M5)
+- [ ] M4 LLM extraction (infrastructure for ORDER_WIN; scope confirmed at G1): T4.1 ✅ · T4.2 ✅ · T4.3 ✅ · T4.4 ✅ · T4.5 ⏸ (code ✅; labels on hold by the G1 decision) · T4.6 ⏳ (code ✅; needs the labels) · T4.7 ⏳ (pre-registered; code ✅; the run needs items 3, 5 and 7)
+- [ ] M5 Intraday data & reaction curves (G1b): T5.1 ⏳ (code ✅; token: human, item 6) · T5.2 ⏳ (code ✅; the fetch needs the token) · T5.3 ⏳ (Amendment 1 registered; arm B run: not supported; arm A needs bars and 500 live filings) · T5.4 ⏳ (gate)
 - [ ] M6 Backtester (G2): T6.1 ⏳ (model ✅; broker-calculator check needs the token, item 6) · T6.2 ✅ · T6.3 ✅ · T6.4 ✅ · T6.5 ✅ · T6.6 ✅ · T6.7 ✅ · T6.8 ⏳ (code ✅; the G2 run needs bars, events and T4.7's revenue feature)
 - [ ] M7 Paper trading (G3): T7.1 ⏳ (code ✅; full session over the mock exchange ✅; the real day: human, item 10) · T7.2 ⏳ [ASK] (measured by `gats paper status`; needs live data) · T7.3 ⏳ (code ✅; bot: human, item 9) · T7.4 ⏳ (scripts and docs ✅; VM: human, item 11) · T7.5 ⏳ (report code ✅; needs two months of paper)
 - [ ] M8 Live pilot (G4, human-only): T8.1 ✅ (off by default; order API documented, never called) · T8.2 ✅ · T8.3 ✅ · T8.4 ✅ · G4: the human's
@@ -157,6 +165,26 @@ are PowerShell, run from `C:\Projects\GATS`.
 ## Log
 
 - **2026-10-04:**
+  - **G1 decision and M5 Amendment 1.** The human chose option 1 (run M5, no labelling) and
+    asked for two arms, both registered before anything intraday was computed (dcb697b).
+    Arm A, confirmatory: ORDER_WIN filings made during market hours, entry after the
+    measured p95 latency; it waits for bars and 500 live filings. Arm B, exploratory
+    (suggested by M3's data): short the open after an out-of-hours order win that gapped up
+    1% or more, against matched gap-ups with no filing. **Arm B: not supported.** In the
+    test period the short earned +0.46% after costs, but gap-ups with no filing faded as
+    much (+0.79% before costs): the filing effect is -0.10% (lower bound -0.31%, 885
+    events). The idea stops here. Run 20261004T092219Z (experiment #2), reproduced as
+    20261004T092946Z (#3) to save its frames; `reports/M5b_gap_fade.md`. The measurement check
+    asked for first found no stale index open: the 0.1% same-day tilt is a size effect
+    (pre-registration, A1.3). Checked by hand against the database: three events and one
+    control cell (7 of 7 controls; frames in `data/research/m5b-gap-fade/20261004T092946Z`).
+  - Not a result, an observation from arm B: gap-ups with no filing gave back 0.79% (test)
+    and 0.86% (train) of the open by the close. So the same-day loss M3 saw after order
+    wins looks like the ordinary gap fade, not something about filings. A filing-free gap
+    fade would be a new hypothesis (S3-like) needing its own pre-registration and forward
+    data; the opening print is not a price one can count on getting.
+  - Documentation freeze at the human's request: only PROGRESS, DATA_SOURCES,
+    `.env.example`, pre-registrations and the trial log are written until he lifts it.
   - **M3 run and gate G1: no edge found at the daily horizon.** Pre-registered run
     `20261004T061547Z` on the full backfill (1,042,483 NSE filings, 1,738 sessions). All
     20 confirmatory tests have a negative mean in the test period; order wins lose 0.97%
