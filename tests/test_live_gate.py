@@ -213,6 +213,7 @@ def test_gats_gate_approve_refuses_without_a_person_at_a_terminal(workdir: Path)
 class FakeBroker:
     def __init__(self) -> None:
         self.placed: list[BrokerOrder] = []
+        self.cancelled: list[str] = []
         self.fail: Exception | None = None
         self.reports: dict[str, BrokerState] = {}
         self.held: list[BrokerPosition] = []
@@ -224,7 +225,7 @@ class FakeBroker:
         return f"B{len(self.placed)}"
 
     async def cancel(self, order_id: str) -> None:
-        raise AssertionError("not used")
+        self.cancelled.append(order_id)
 
     async def order(self, order_id: str) -> BrokerState:
         return self.reports[order_id]
@@ -288,17 +289,38 @@ async def test_an_order_with_no_answer_is_never_resent_and_switches_trading_off(
     oms: Oms, engine: Database
 ) -> None:
     broker: Any = oms.broker
-    broker.fail = OutcomeUnknown("place gats-1-1: ReadTimeout")
-    assert await oms.submit(engine_order(1), 0.0) == "unknown"
-    assert await oms.submit(engine_order(1), 0.0) == "unknown" and len(broker.placed) == 1
+    assert await oms.submit(engine_order(1), 0.0) == "sent"  # ten shares, soon held
+    broker.reports["B1"] = BrokerState("B1", "complete", 10, 0, 500.0, "gats-1-1", None)
+    await oms.refresh()
+    broker.fail = OutcomeUnknown("place gats-1-2: ReadTimeout")
+    assert await oms.submit(engine_order(2), 0.0) == "unknown"
+    assert await oms.submit(engine_order(2), 0.0) == "unknown" and len(broker.placed) == 2
     assert oms.halted and "unknown_order" in oms.kill_switch.read_text("utf-8")
     with engine.begin() as conn:
         (halt,) = conn.execute(select(live_breaches)).all()
     assert halt.kind == "unknown_order" and "may exist there" in halt.detail
     broker.fail = None
-    assert await oms.submit(engine_order(2), 0.0) == "refused"  # no entries while switched off
-    assert await oms.submit(engine_order(3, side="sell"), 0.0) == "sent"  # exits still go out
-    assert [o.client_id for o in broker.placed] == ["gats-1-1", "gats-1-3"]
+    assert await oms.submit(engine_order(3), 0.0) == "refused"  # no entries while switched off
+    assert await oms.submit(engine_order(4, side="sell"), 0.0) == "sent"  # exits still go out
+    assert [o.client_id for o in broker.placed] == ["gats-1-1", "gats-1-2", "gats-1-4"]
+
+
+async def test_a_real_sell_never_exceeds_what_real_fills_hold(oms: Oms, engine: Database) -> None:
+    """The engine's simulated position can be larger than the real one (a
+    real entry that only partly filled): selling the difference would open a
+    short."""
+    broker: Any = oms.broker
+    assert await oms.submit(engine_order(1, side="sell"), 0.0) == "refused"  # nothing held
+    assert broker.placed == [] and not oms.halted  # a consequence, not an alarm
+    assert await oms.submit(engine_order(2), 0.0) == "sent"
+    broker.reports["B1"] = BrokerState("B1", "open", 6, 4, 500.0, "gats-1-2", None)
+    await oms.refresh()
+    assert oms.sellable(KEY) == 6
+    assert await oms.submit(engine_order(3, side="sell"), 0.0) == "sent"  # the engine says 10
+    assert broker.placed[-1].quantity == 6 and oms.sellable(KEY) == 0  # all of it is leaving
+    assert await oms.submit(engine_order(4, side="sell"), 0.0) == "refused"
+    assert stored(engine)[-1].message == "nothing held at the broker to sell"
+    assert await oms.cancel_expired([]) == 0
 
 
 async def test_a_refusal_by_the_broker_is_final_and_a_cap_breach_switches_off(

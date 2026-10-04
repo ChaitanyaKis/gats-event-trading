@@ -105,8 +105,7 @@ class Broker:
         return httpx.Response(200, json={"status": "success", "data": {"candles": candles[::-1]}})
 
 
-@pytest.fixture
-def broker(svc: Services, clock: FakeClock) -> Broker:
+def make_broker(svc: Services, clock: FakeClock) -> Broker:
     """The synthetic market (AAA: Rs 400 crore a year of revenue, liquid, on
     no surveillance list) and a broker to ask for candles."""
     svc.settings.upstox_analytics_token = SecretStr("test-token")
@@ -133,11 +132,20 @@ def broker(svc: Services, clock: FakeClock) -> Broker:
     return Broker(clock)
 
 
-@pytest.fixture
-def system(svc: Services, tmp_path: Path) -> System:
+def make_system(svc: Services, tmp_path: Path) -> System:
     """The real paper configuration; only the kill switch lives elsewhere."""
     loaded = load_system(Path("configs/paper.yaml"), svc.settings, root=ROOT)
     return replace(loaded, root=tmp_path)
+
+
+@pytest.fixture
+def broker(svc: Services, clock: FakeClock) -> Broker:
+    return make_broker(svc, clock)
+
+
+@pytest.fixture
+def system(svc: Services, tmp_path: Path) -> System:
+    return make_system(svc, tmp_path)
 
 
 def mock_http(svc: Services, broker: Broker) -> None:

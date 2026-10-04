@@ -166,6 +166,19 @@ class Oms:
             book[row.instrument_key] = book.get(row.instrument_key, 0) + signed
         return {key: n for key, n in book.items() if n}
 
+    def sellable(self, instrument_key: str) -> int:
+        """Shares of a stock that real fills hold and no working sell
+        order already covers."""
+        with self.db.begin() as conn:
+            rows = [r for r in self._rows(conn) if r.instrument_key == instrument_key]
+        held = sum(r.filled_quantity if r.side == "buy" else -r.filled_quantity for r in rows)
+        leaving = sum(
+            r.quantity - r.filled_quantity
+            for r in rows
+            if r.side == "sell" and r.state not in TERMINAL
+        )
+        return max(int(held - leaving), 0)
+
     def account(self, instrument_key: str, day_loss_rs: float) -> Account:
         """What the caps look at. Costs use limit prices for working buys
         (the most they can cost) and fill prices for what is held."""
@@ -197,20 +210,28 @@ class Oms:
         signal = order.signal
         key = client_id(self.run_id, order.order_id)
         now = self.clock()
-        notional = order.quantity * order.limit
         with self.db.begin() as conn:
             known = conn.execute(
                 select(live_orders.c.state).where(live_orders.c.client_id == key)
             ).scalar()
         if known is not None:
             return str(known)
-        broken = None
-        if self.halted and not signal.closes:
-            broken = "live trading is switched off (kill switch)"
-        else:
-            broken = breach(
-                self.caps, notional, signal.closes, self.account(signal.instrument_key, day_loss_rs)
-            )
+        quantity = order.quantity
+        broken: str | None = None
+        switch_off = True  # a refusal that means something upstream is wrong
+        if signal.side == "sell":
+            # Long only: a real sell never exceeds what the real fills hold.
+            # The engine's simulated position can be larger (a real entry
+            # that was refused or never filled), and selling shares that are
+            # not there would open a short.
+            quantity = min(quantity, self.sellable(signal.instrument_key))
+            if quantity <= 0:
+                broken, switch_off = "nothing held at the broker to sell", False
+        elif self.halted:
+            broken, switch_off = "live trading is switched off (kill switch)", False
+        if broken is None:
+            account = self.account(signal.instrument_key, day_loss_rs)
+            broken = breach(self.caps, quantity * order.limit, signal.closes, account)
         row = {
             "client_id": key,
             "approval_id": self.approval_id,
@@ -219,7 +240,7 @@ class Oms:
             "instrument_key": signal.instrument_key,
             "side": signal.side,
             "product": signal.product,
-            "quantity": order.quantity,
+            "quantity": quantity if quantity > 0 else order.quantity,
             "limit_price": order.limit,
             "closes": signal.closes,
             "state": "refused" if broken else "intent",
@@ -231,11 +252,11 @@ class Oms:
         with self.db.begin() as conn:
             conn.execute(live_orders.insert().values(**row))
         if broken:
-            if not self.halted:
+            if switch_off and not self.halted:
                 self.halt("cap", f"{key}: {broken}")
             return "refused"
         request = BrokerOrder(
-            key, signal.instrument_key, signal.side, signal.product, order.quantity, order.limit
+            key, signal.instrument_key, signal.side, signal.product, quantity, order.limit
         )
         try:
             broker_id = await self.broker.place(request)
@@ -291,17 +312,51 @@ class Oms:
             changed += 1
         return changed
 
-    async def check_positions(self) -> list[Mismatch]:
-        """Compare our book with the broker's; a difference switches off."""
+    async def differences(self) -> list[Mismatch]:
+        """Where our book and the broker's disagree, after asking about
+        every working order first (a fill we have not heard of yet is not a
+        disagreement). Nothing is switched off here."""
+        await self.refresh()
         try:
             positions = await self.broker.positions()
         except BrokerError as exc:
             log.warning("positions not checked %s", kv(error=str(exc)))
             return []
-        mismatches = reconcile(self.held(), positions)
+        return reconcile(self.held(), positions)
+
+    async def check_positions(self) -> list[Mismatch]:
+        """Compare our book with the broker's; a difference switches off."""
+        mismatches = await self.differences()
         if mismatches:
             self.halt("reconcile", "; ".join(str(m) for m in mismatches))
         return mismatches
+
+    async def cancel_expired(self, engine_orders: Sequence[Order]) -> int:
+        """Cancel the real order of every engine order that has ended
+        without filling in the simulation (its time ran out, the day
+        closed). Left alone it could fill later, behind the engine's back.
+        Returns how many cancels the broker accepted."""
+        ended = {o.order_id for o in engine_orders if o.status in ("expired", "rejected")}
+        with self.db.begin() as conn:
+            rows = [
+                r
+                for r in self._rows(conn)
+                if r.state == "sent" and r.engine_order_id in ended and r.broker_order_id
+            ]
+        done = 0
+        for row in rows:
+            try:
+                await self.broker.cancel(row.broker_order_id)
+            except OutcomeUnknown as exc:
+                self._set(row.client_id, "sent", "unknown", message=str(exc)[:300])
+                self.halt("unknown_order", f"{row.client_id}: cancel got no answer")
+                continue
+            except BrokerError as exc:  # already filled or gone: the next refresh says which
+                log.warning("cancel refused %s", kv(order=row.client_id, error=str(exc)))
+                continue
+            self._set(row.client_id, "sent", "cancelled", message="ended in the simulation")
+            done += 1
+        return done
 
     def open_orders(self) -> int:
         with self.db.begin() as conn:

@@ -620,7 +620,7 @@ def _previous_session(calendar: TradingCalendar, day: date) -> date | None:
     return None
 
 
-_FATAL = (TokenMissing, DesignChanged, Diverged)  # nothing a retry can fix
+FATAL = (TokenMissing, DesignChanged, Diverged)  # nothing a retry can fix
 
 
 async def run_paper(
@@ -640,7 +640,7 @@ async def run_paper(
             started = svc.clock()
             try:
                 report = await runtime.tick()
-            except _FATAL:
+            except FATAL:
                 raise
             except Exception as exc:
                 failures += 1
