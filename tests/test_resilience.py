@@ -409,9 +409,25 @@ class TestSchemaUpgrade:
             version = conn.execute(
                 text("SELECT value FROM schema_meta WHERE key='schema_version'")
             ).scalar_one()
-        assert version == str(SCHEMA_VERSION) == "10"
+        assert version == str(SCHEMA_VERSION)
         tables = set(inspect(engine).get_table_names())
         assert {"paper_runs", "paper_journal", "paper_orders", "paper_executions"} <= tables
+        engine.dispose()
+
+    def test_v10_database_gains_the_live_tables(self, tmp_path: Path) -> None:
+        engine = make_engine(f"sqlite:///{tmp_path / 'v10.db'}")
+        earlier = [t for name, t in metadata.tables.items() if not name.startswith("live_")]
+        metadata.create_all(engine, tables=earlier)
+        with engine.begin() as conn:
+            conn.execute(text("INSERT INTO schema_meta VALUES ('schema_version', '10')"))
+        init_db(engine)
+        with engine.begin() as conn:
+            version = conn.execute(
+                text("SELECT value FROM schema_meta WHERE key='schema_version'")
+            ).scalar_one()
+        assert version == str(SCHEMA_VERSION) == "11"
+        tables = set(inspect(engine).get_table_names())
+        assert {"live_approvals", "live_orders", "live_breaches"} <= tables
         engine.dispose()
 
     def test_newer_database_is_refused(self, tmp_path: Path) -> None:

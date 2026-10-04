@@ -1,0 +1,37 @@
+# systemd unit for the paper runtime (T7.4), next to gats-recorder.service
+# (same user, same directory). It cannot send an order: fills are simulated.
+#
+# Install (after the recorder's unit is running):
+#   sudo cp deploy/gats-paper.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now gats-paper
+#   journalctl -u gats-paper -f                                   # logs
+#   sudo -u gats /opt/gats/app/.venv/bin/gats paper status         # what it has done
+#
+# The run name (s1) is part of the command: a changed design needs a new one.
+
+[Unit]
+Description=GATS paper runtime
+# The recorder is the only source of filings.
+After=network-online.target gats-recorder.service
+Wants=network-online.target gats-recorder.service
+# A run that refuses to resume (changed design, a record the code no longer
+# reproduces, no token) exits with code 1. Do not restart it forever: stop
+# after five quick failures and let `gats paper status` say why.
+StartLimitIntervalSec=600
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=gats
+WorkingDirectory=/opt/gats/app
+EnvironmentFile=/opt/gats/app/.env
+ExecStart=/opt/gats/app/.venv/bin/gats paper run --name s1
+Restart=always
+RestartSec=15
+TimeoutStopSec=30
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/opt/gats/app/data
+
+[Install]
+WantedBy=multi-user.target

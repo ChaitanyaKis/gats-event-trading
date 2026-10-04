@@ -189,14 +189,41 @@ class PoliteClient:
         *,
         timeout_s: float | None = None,
         headers: Mapping[str, str] | None = None,
+        label: str | None = None,
+        retries: int | None = None,
     ) -> Fetched:
         """POST a JSON body with the same throttle, retries and backoff as GET.
 
         Used for local services (the Ollama API), which need POST and much
         longer timeouts than exchange pages.
+
+        ``label`` replaces the URL in logs, errors and the result, for URLs
+        that carry a secret (a Telegram bot token is part of the path).
+        ``retries=0`` sends once: a request that may have had an effect (an
+        order) must never be repeated blindly.
         """
         return await self._request(
-            url, params=None, headers=headers, method="POST", json_body=payload, timeout_s=timeout_s
+            url,
+            params=None,
+            headers=headers,
+            method="POST",
+            json_body=payload,
+            timeout_s=timeout_s,
+            label=label,
+            retries=retries,
+        )
+
+    async def delete(
+        self,
+        url: str,
+        *,
+        params: Mapping[str, str] | None = None,
+        headers: Mapping[str, str] | None = None,
+        retries: int | None = None,
+    ) -> Fetched:
+        """DELETE with the same throttle and backoff (a broker's cancel)."""
+        return await self._request(
+            url, params=params, headers=headers, method="DELETE", retries=retries
         )
 
     async def _request(
@@ -209,11 +236,15 @@ class PoliteClient:
         method: str = "GET",
         json_body: Mapping[str, Any] | None = None,
         timeout_s: float | None = None,
+        label: str | None = None,
+        retries: int | None = None,
     ) -> Fetched:
         host = urlsplit(url).netloc
+        shown = label or url  # never the URL itself when it carries a secret
+        max_retries = self._max_retries if retries is None else retries
         last_error: str = "no attempt made"
         last_status: int | None = None
-        for attempt in range(self._max_retries + 1):
+        for attempt in range(max_retries + 1):
             await self._throttle.wait(host, self._sleep)
             started = time.monotonic()
             fetched_at = utcnow()
@@ -234,7 +265,7 @@ class PoliteClient:
                     else:
                         body, too_large = await _read_capped(response, max_bytes)
                         return Fetched(
-                            url=str(response.url),
+                            url=label or str(response.url),
                             status=response.status_code,
                             content=body,
                             content_type=response.headers.get("Content-Type"),
@@ -243,12 +274,15 @@ class PoliteClient:
                             too_large=too_large,
                         )
             except httpx.TransportError as exc:
-                last_error, last_status = f"{type(exc).__name__}: {exc}", None
+                # httpx names the URL in some messages: keep only the error's type
+                # when the URL is secret.
+                detail = type(exc).__name__ if label else f"{type(exc).__name__}: {exc}"
+                last_error, last_status = detail, None
                 delay = self._backoff(attempt)
-            if attempt < self._max_retries:
+            if attempt < max_retries:
                 log.warning(
                     "retrying %s",
-                    kv(url=url, attempt=attempt + 1, error=last_error, delay_s=round(delay, 1)),
+                    kv(url=shown, attempt=attempt + 1, error=last_error, delay_s=round(delay, 1)),
                 )
                 await self._sleep(delay)
-        raise FetchError(url, last_error, status=last_status)
+        raise FetchError(shown, last_error, status=last_status)

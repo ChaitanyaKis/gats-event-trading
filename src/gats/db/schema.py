@@ -35,7 +35,7 @@ from sqlalchemy import (
 
 from gats.db.types import UTCDateTime
 
-SCHEMA_VERSION = 10
+SCHEMA_VERSION = 11
 
 metadata = MetaData(
     naming_convention={
@@ -641,4 +641,60 @@ paper_executions = Table(
     Column("charges", Float, nullable=False),
     Column("reason", Text, nullable=False),
     Column("bar_volume", Integer, nullable=False),
+)
+
+# --- live pilot (M8): nothing here is written unless a human switches live on ---
+# A human's approval of one design under one set of caps. Only
+# `gats gate approve` writes it, from an interactive terminal, after the
+# person typed the confirmation shown with the caps.
+live_approvals = Table(
+    "live_approvals",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("design_hash", String(64), nullable=False),
+    Column("caps_hash", String(64), nullable=False),
+    Column("caps", JSON, nullable=False),
+    Column("g3_report_sha256", String(64), nullable=False),
+    Column("confirmation", Text, nullable=False),  # what the person typed
+    Column("created_by", String(128), nullable=False),
+    Column("created_at", UTCDateTime, nullable=False),
+    Column("expires_at", UTCDateTime, nullable=False),
+    Column("revoked_at", UTCDateTime),
+    Column("revoked_reason", Text),
+    Index(None, "design_hash", "caps_hash"),
+)
+
+# Every real order, written BEFORE it is sent (so a crash can never leave an
+# order at the broker that the system does not know about).
+live_orders = Table(
+    "live_orders",
+    metadata,
+    Column("client_id", String(40), primary_key=True),  # idempotency key, sent as the tag
+    Column("approval_id", Integer, ForeignKey("live_approvals.id"), nullable=False),
+    Column("run_id", Integer, ForeignKey("paper_runs.id"), nullable=False),
+    Column("engine_order_id", Integer, nullable=False),
+    Column("instrument_key", String(64), nullable=False),
+    Column("side", String(4), nullable=False),
+    Column("product", String(16), nullable=False),
+    Column("quantity", Integer, nullable=False),
+    Column("limit_price", Float, nullable=False),
+    Column("closes", Boolean, nullable=False),
+    Column("state", String(16), nullable=False),
+    Column("broker_order_id", String(64)),
+    Column("filled_quantity", Integer, nullable=False),
+    Column("average_price", Float),
+    Column("message", Text),
+    Column("created_at", UTCDateTime, nullable=False),
+    Column("updated_at", UTCDateTime, nullable=False),
+    Index(None, "state"),
+)
+
+# A cap that was hit, or anything else that switched live trading off.
+live_breaches = Table(
+    "live_breaches",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("at", UTCDateTime, nullable=False),
+    Column("kind", String(32), nullable=False),  # cap | unknown_order | reconcile
+    Column("detail", Text, nullable=False),
 )

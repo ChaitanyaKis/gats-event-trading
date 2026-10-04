@@ -225,6 +225,22 @@ class Settings(BaseSettings):
     paper_event_lookback_days: int = Field(default=3, ge=1)  # after downtime
     paper_close_grace_s: float = Field(default=300.0, ge=0)  # after 15:30, for the last bars
     paper_facts_retry_s: float = Field(default=30.0, gt=0)  # after a failed extraction
+    # Alerts (T7.3): a Telegram bot the human creates. Both values are set in
+    # .env only; the token is a secret (it is part of the request URL, so it
+    # is kept out of every log line and error message).
+    telegram_bot_token: SecretStr | None = None
+    telegram_chat_id: str | None = None
+    telegram_api_base: str = "https://api.telegram.org"
+    alerts_max_chars: int = Field(default=3500, ge=100)  # kept well under the API's limit
+    # Live trading (M8). OFF by default, and switching it on is not enough:
+    # `gats live` also needs a human-made approval record (`gats gate approve`).
+    # The order token is the broker's daily access token (the Analytics Token
+    # cannot trade); a secret, set in .env by the human only.
+    live_enabled: bool = False
+    live_config_path: Path = Path("configs/live.yaml")
+    upstox_order_base: str = "https://api-hft.upstox.com"
+    upstox_access_token: SecretStr | None = None
+    g3_report_path: Path = Path("reports/M7_paper.md")
     # Cross-exchange grouping of recent filings (rules: gats.refdata.dedupe).
     dedupe_poll_s: float = Field(default=300.0, gt=0)
     dedupe_lookback_days: int = Field(default=2, ge=1)

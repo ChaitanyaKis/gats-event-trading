@@ -250,6 +250,10 @@ class Engine:
             sum(amount for _, amount in self.state.unsettled),
         )
 
+    def day_loss(self) -> float:
+        """Rupees lost so far today (negative when the day is up)."""
+        return self.state.day_start_equity - self._equity()
+
     def _context(self, now: datetime) -> StaticContext:
         working: dict[str, int] = {}
         for order in self.orders:

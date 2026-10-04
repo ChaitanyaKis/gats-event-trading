@@ -1,0 +1,24 @@
+# Live pilot (M8): the hard caps on real money. HUMAN-ONLY values.
+#
+# Live trading runs exactly the system in configs/paper.yaml: the one that
+# was paper-traded and judged at gate G3. Nothing else can go live.
+#
+# Every cap below is 0, which means "not set": `gats live` refuses to start
+# until the human sets them, and `gats gate approve` shows them and asks for
+# a typed confirmation. Changing any value afterwards voids the approval.
+# Claude never edits these numbers: how much money to risk is not an
+# engineering decision.
+paper: configs/paper.yaml
+caps:
+  max_capital_rs: 0        # most rupees deployed at once (positions + working buys)
+  max_daily_loss_rs: 0     # today's loss at which live trading switches itself off
+  max_position_rs: 0       # most rupees in one stock
+  max_orders_per_day: 0    # real orders per day, entries and exits together
+approval_valid_days: 30    # an approval expires; a pilot is reviewed, not left running
+# The broker's status words that end an order, mapped to ours (filled,
+# cancelled, rejected). Only "complete" is confirmed from Upstox's docs
+# (2026-10-04); the human adds the others from the broker's order-status
+# appendix before a pilot. An unlisted word leaves the order "working",
+# which is the safe reading: it keeps being followed and reconciled.
+order_end_statuses:
+  complete: filled

@@ -2344,6 +2344,7 @@ def paper_run(
 ) -> None:
     """Run the paper runtime until Ctrl+C. The recorder must be running too:
     it is the only source of filings."""
+    from gats.alerts import alerter
     from gats.marketdata.upstox import TokenMissing, auth_headers
     from gats.runtime.journal import DesignChanged, Diverged
     from gats.runtime.paper import PaperRuntime, load_system, run_paper
@@ -2372,7 +2373,7 @@ def paper_run(
                     f"{len(run.events)} filings, {len(run.engine.orders)} orders and "
                     f"{len(run.engine.executions)} fills so far. Ctrl+C stops it."
                 )
-                await run_paper(svc, runtime, stop)
+                await run_paper(svc, runtime, stop, alerter(svc))
             except (TokenMissing, DesignChanged, Diverged) as exc:
                 typer.echo(f"REFUSED: {exc}")
                 return 1
@@ -2455,3 +2456,175 @@ def paper_status(
         )
     else:
         typer.echo("runtime: not running (no heartbeat file)")
+
+
+# --- live pilot (M8): human-only -----------------------------------------------------
+
+gate_app = typer.Typer(
+    no_args_is_help=True,
+    help="The gate in front of live trading (M8). `approve` is for a person at a terminal.",
+)
+app.add_typer(gate_app, name="gate")
+LiveConfig = Annotated[
+    Path | None, typer.Option("--config", help="Live config (default: configs/live.yaml).")
+]
+
+
+def _live_system(settings: Settings, config: Path | None) -> Any:
+    from gats.oms.caps import load_live
+    from gats.runtime.paper import load_system
+
+    path = config or settings.live_config_path
+    try:
+        spec = load_live(path)
+        return spec, load_system(spec.paper, settings)
+    except (OSError, ValueError) as exc:
+        typer.echo(f"cannot load the live system from {path}: {exc}")
+        raise typer.Exit(1) from exc
+
+
+@gate_app.command("status")
+def gate_status(config: LiveConfig = None) -> None:
+    """What stands between this system and live trading (read-only)."""
+    from gats.runtime import live
+
+    settings = _settings(log_to_file=False)
+    spec, system = _live_system(settings, config)
+    db = make_engine(settings.resolved_db_url)
+    init_db(db)
+    with db.begin() as conn:
+        found = live.problems(conn, settings, system, spec, utcnow())
+    db.dispose()
+    typer.echo(f"design {system.design_hash} ({system.strategy.version}); caps {spec.caps.digest}")
+    for name, value in spec.caps.model_dump().items():
+        typer.echo(f"  {name}: {value:,}")
+    if not found:
+        typer.echo("live trading MAY start: every lock is open")
+        return
+    typer.echo("live trading may NOT start:")
+    for problem in found:
+        typer.echo(f"  - {problem}")
+
+
+@gate_app.command("approve")
+def gate_approve(config: LiveConfig = None) -> None:
+    """Approve live trading of the current design under the current caps.
+    For a person at an interactive terminal only."""
+    from gats.oms import gate
+
+    if not (sys.stdin.isatty() and sys.stdout.isatty()):
+        typer.echo(
+            "REFUSED: this needs an interactive terminal. A person has to read the limits and "
+            "type the confirmation; it cannot be scripted or piped."
+        )
+        raise typer.Exit(1)
+    settings = _settings()
+    spec, system = _live_system(settings, config)
+    report = settings.g3_report_path
+    typer.echo(f"Design:   {system.design_hash} ({system.strategy.version})")
+    typer.echo(f"G3 paper report: {report} says {gate.g3_verdict(report) or 'nothing'}")
+    typer.echo("Real money at risk under this approval:")
+    typer.echo(f"  most capital deployed at once: Rs {spec.caps.max_capital_rs:,.0f}")
+    typer.echo(
+        f"  loss at which it switches itself off (per day): Rs {spec.caps.max_daily_loss_rs:,.0f}"
+    )
+    typer.echo(f"  most in one stock: Rs {spec.caps.max_position_rs:,.0f}")
+    typer.echo(f"  most real orders per day: {spec.caps.max_orders_per_day}")
+    typer.echo(f"  valid for {spec.approval_valid_days} days")
+    phrase = gate.confirmation(system.design_hash, spec.caps)
+    typer.echo(f"To approve, type exactly:\n  {phrase}")
+    typed = typer.prompt("confirmation", default="", show_default=False)
+    db = make_engine(settings.resolved_db_url)
+    init_db(db)
+    try:
+        with db.begin() as conn:
+            approval = gate.approve(
+                conn,
+                design_hash=system.design_hash,
+                caps=spec.caps,
+                report=report,
+                typed=typed,
+                now=utcnow(),
+                valid_days=spec.approval_valid_days,
+            )
+    except gate.ApprovalRefused as exc:
+        typer.echo(f"REFUSED: {exc}")
+        raise typer.Exit(1) from exc
+    finally:
+        db.dispose()
+    typer.echo(f"approval #{approval} recorded. Revoke it with `gats gate revoke {approval}`.")
+
+
+@gate_app.command("revoke")
+def gate_revoke(
+    approval: Annotated[int, typer.Argument(help="The approval's number.")],
+    reason: Annotated[str, typer.Option(help="Why.")] = "revoked by hand",
+) -> None:
+    """Withdraw an approval: live trading cannot start under it again."""
+    from gats.oms import gate
+
+    settings = _settings()
+    db = make_engine(settings.resolved_db_url)
+    init_db(db)
+    with db.begin() as conn:
+        done = gate.revoke(conn, approval, reason, utcnow())
+    db.dispose()
+    typer.echo(f"approval #{approval} revoked" if done else f"no approval #{approval} in force")
+    if not done:
+        raise typer.Exit(1)
+
+
+@app.command()
+def live(
+    name: Annotated[str, typer.Option(help="The run's name.")],
+    config: LiveConfig = None,
+) -> None:
+    """Trade real money. HUMAN ONLY. Refuses unless live trading is switched
+    on, the caps are set, gate G3 passed and a person approved this design."""
+    from gats.alerts import alerter
+    from gats.oms import gate
+    from gats.runtime import live as live_runtime
+    from gats.runtime.journal import DesignChanged, Diverged
+    from gats.runtime.paper import PaperRuntime
+
+    settings = _settings()
+    spec, system = _live_system(settings, config)
+    db = make_engine(settings.resolved_db_url)
+    init_db(db)
+    with db.begin() as conn:
+        found = live_runtime.problems(conn, settings, system, spec, utcnow())
+        approval = gate.approval_id(conn, system.design_hash, spec.caps)
+    db.dispose()
+    if found or approval is None:
+        typer.echo("REFUSED: live trading may not start:")
+        for problem in found:
+            typer.echo(f"  - {problem}")
+        raise typer.Exit(1)
+
+    async def main() -> int:
+        stop = asyncio.Event()
+        if sys.platform != "win32":
+            loop = asyncio.get_running_loop()
+            for sig in (signal.SIGTERM, signal.SIGINT):
+                loop.add_signal_handler(sig, stop.set)
+        async with _services(settings) as svc:
+            try:
+                runtime = PaperRuntime(svc, system, name)
+            except (DesignChanged, Diverged) as exc:
+                typer.echo(f"REFUSED: {exc}")
+                return 1
+            oms = live_runtime.build_oms(svc, runtime, spec, approval)
+            typer.echo(
+                f"LIVE run {name!r}: design {system.design_hash}, approval #{approval}, capital "
+                f"cap Rs {spec.caps.max_capital_rs:,.0f}. Ctrl+C stops it; creating "
+                f"{oms.kill_switch} stops new entries."
+            )
+            await live_runtime.run_live(svc, runtime, oms, stop, alerter(svc))
+        return 0
+
+    try:
+        code = asyncio.run(main())
+    except KeyboardInterrupt:
+        typer.echo("live run stopped")
+        return
+    raise typer.Exit(code)

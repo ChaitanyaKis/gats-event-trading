@@ -35,6 +35,7 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import Connection, and_, select
 
+from gats.alerts import Alerter, NoAlerts, daily_summary, tick_messages
 from gats.backtest.costs import CostModel
 from gats.backtest.engine import Engine, EngineConfig, Execution, Listener, Order
 from gats.backtest.feed import Lookups, market_events, with_revenue_ratio
@@ -605,11 +606,14 @@ def _previous_session(calendar: TradingCalendar, day: date) -> date | None:
 _FATAL = (TokenMissing, DesignChanged, Diverged)  # nothing a retry can fix
 
 
-async def run_paper(svc: Services, runtime: PaperRuntime, stop: asyncio.Event) -> None:
+async def run_paper(
+    svc: Services, runtime: PaperRuntime, stop: asyncio.Event, alerts: Alerter | None = None
+) -> None:
     """Tick until told to stop. A tick that fails does not end the run: the
     engine has been rebuilt from the journal, and the loop backs off. A
     missing token or a run that no longer matches its record does end it."""
     settings = svc.settings
+    alerts = alerts or NoAlerts()
     heartbeat = Heartbeat(settings.paper_heartbeat_path)
     failures = 0
     beat_at: datetime | None = None
@@ -634,6 +638,9 @@ async def run_paper(svc: Services, runtime: PaperRuntime, stop: asyncio.Event) -
                 delay = min(
                     settings.job_error_backoff_max_s, settings.paper_poll_s * 2 ** min(failures, 10)
                 )
+                await alerts.send(
+                    f"[{runtime.name}] ERROR: tick failed: {type(exc).__name__}: {exc}"[:500]
+                )
             else:
                 recovered, failures = failures > 0, 0
                 active = bool(
@@ -641,6 +648,13 @@ async def run_paper(svc: Services, runtime: PaperRuntime, stop: asyncio.Event) -
                 )
                 if active:
                     log.info("paper %s", kv(run=runtime.name, **summary(report)))
+                for message in tick_messages(
+                    runtime.name, report.orders, report.fills, report.errors
+                ):
+                    await alerts.send(message)
+                if report.closed is not None:
+                    result = runtime.run.engine.result()
+                    await alerts.send(daily_summary(runtime.name, report.closed, result))
                 quiet_s = None if beat_at is None else (started - beat_at).total_seconds()
                 if active or recovered or quiet_s is None or quiet_s >= _HEARTBEAT_S:
                     engine = runtime.run.engine
