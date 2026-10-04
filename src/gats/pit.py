@@ -44,11 +44,15 @@ class TrailingRevenue:
 
 
 class AsOf:
-    def __init__(self, conn: Connection, as_of: datetime) -> None:
+    def __init__(
+        self, conn: Connection, as_of: datetime, *, calendar: TradingCalendar | None = None
+    ) -> None:
+        """``calendar``: one already loaded, for a caller that makes a new
+        clock every few seconds (loading it scans the price table)."""
         self._conn = conn
         self._as_of = ensure_aware(as_of)
         self._resolver: Resolver | None = None
-        self._calendar: TradingCalendar | None = None
+        self._calendar: TradingCalendar | None = calendar
         self._adjuster: ReturnAdjuster | None = None
 
     @property

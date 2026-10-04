@@ -214,6 +214,17 @@ class Settings(BaseSettings):
     handoff_fallback_s: float = Field(default=30.0, gt=0)
     handoff_max_age_s: float = Field(default=3600.0, gt=0)  # older filings: the batch jobs
     handoff_max_downloads: int = Field(default=10, ge=1)  # attachments per run
+    # Paper runtime (M7). The poll is of the local database, not of an
+    # exchange. A candle is trusted once its minute ended `paper_bar_margin_s`
+    # before the broker was asked (how soon a finished candle is published is
+    # not documented; T7.2 measures it).
+    paper_config_path: Path = Path("configs/paper.yaml")
+    paper_poll_s: float = Field(default=2.0, gt=0)
+    paper_bar_margin_s: float = Field(default=3.0, ge=0)
+    paper_event_wait_s: float = Field(default=900.0, gt=0)  # for a filing's text and facts
+    paper_event_lookback_days: int = Field(default=3, ge=1)  # after downtime
+    paper_close_grace_s: float = Field(default=300.0, ge=0)  # after 15:30, for the last bars
+    paper_facts_retry_s: float = Field(default=30.0, gt=0)  # after a failed extraction
     # Cross-exchange grouping of recent filings (rules: gats.refdata.dedupe).
     dedupe_poll_s: float = Field(default=300.0, gt=0)
     dedupe_lookback_days: int = Field(default=2, ge=1)
@@ -260,6 +271,10 @@ class Settings(BaseSettings):
     @property
     def heartbeat_path(self) -> Path:
         return self.data_dir / "heartbeat.json"
+
+    @property
+    def paper_heartbeat_path(self) -> Path:
+        return self.data_dir / "paper_heartbeat.json"
 
     def ensure_dirs(self) -> None:
         for path in (self.data_dir, self.raw_dir, self.logs_dir):

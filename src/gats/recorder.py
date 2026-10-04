@@ -700,7 +700,7 @@ class Heartbeat:
             raise
 
 
-async def _sleep_or_stop(
+async def sleep_or_stop(
     stop: asyncio.Event, seconds: float, wake: asyncio.Event | None = None
 ) -> None:
     """Sleep ``seconds``; less if the recorder stops or the job is woken."""
@@ -754,7 +754,7 @@ async def run_job_loop(
             )
             log.warning("job failed %s", kv(job=job.name, failures=failures, error=outcome.error))
             delay = min(max_backoff_s, job.interval_s(svc.clock()) * (2 ** min(failures, 10)))
-        await _sleep_or_stop(stop, delay, getattr(job, "wake", None))
+        await sleep_or_stop(stop, delay, getattr(job, "wake", None))
 
 
 async def run_recorder(svc: Services, stop: asyncio.Event, jobs: list[Job] | None = None) -> None:

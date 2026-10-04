@@ -16,6 +16,13 @@ reply is ``{"status": "success", "data": {"candles": [[timestamp, open,
 high, low, close, volume, open_interest], ...]}}`` with IST timestamps
 (``2025-01-01T09:15:00+05:30``). One-minute data starts January 2022, at
 most one month per request.
+
+**Intraday candles** (documented 2026-10-03, NOT yet probed: same token):
+``GET https://api.upstox.com/v3/historical-candle/intraday/{key}/{unit}/
+{interval}`` returns "OHLC values for the current trading day" in the same
+reply shape, newest first. The docs do not say whether the candle still
+forming is included, how soon a finished one appears, or what is served
+outside a session, so callers must decide by the clock, not by position.
 """
 
 from __future__ import annotations
@@ -33,6 +40,7 @@ from gats.timeutil import to_utc
 SOURCE = "UPSTOX"
 INSTRUMENTS_KIND = "upstox_instruments"
 CANDLES_KIND = "upstox_candles"
+INTRADAY_KIND = "upstox_intraday"
 PARSER_VERSION = "upstox-v1"
 SEGMENTS = frozenset({"NSE_EQ", "NSE_INDEX"})  # cash equities and indices only
 
@@ -73,6 +81,14 @@ def candles_url(
     return (
         f"{base.rstrip('/')}/v3/historical-candle/{quote(instrument_key, safe='')}/"
         f"{unit}/{interval}/{to_date.isoformat()}/{from_date.isoformat()}"
+    )
+
+
+def intraday_url(base: str, instrument_key: str, unit: str = "minutes", interval: int = 1) -> str:
+    """The V3 intraday candle URL: the current trading day's candles."""
+    return (
+        f"{base.rstrip('/')}/v3/historical-candle/intraday/{quote(instrument_key, safe='')}/"
+        f"{unit}/{interval}"
     )
 
 

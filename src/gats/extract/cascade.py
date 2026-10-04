@@ -53,6 +53,7 @@ from gats.ingest import Services
 from gats.timeutil import to_ist
 
 Mode = Literal["rules", "llm", "cascade"]
+EVENT_TYPES = frozenset({"ORDER_WIN"})  # the event types that have an extractor
 _MAX_CONSECUTIVE_FAILURES = 3
 
 
@@ -216,7 +217,7 @@ async def run_extractions(
 ) -> CascadeStats:
     """Extract facts for up to ``limit`` filings (only ``ids``, if given) not
     yet extracted by this version."""
-    if event_type != "ORDER_WIN":
+    if event_type not in EVENT_TYPES:
         raise ValueError(f"no extractor for {event_type} yet (M4 scope is ORDER_WIN)")
     settings = svc.settings
     prompt, model = prompt_hash(settings.llm_max_chars), settings.llm_model

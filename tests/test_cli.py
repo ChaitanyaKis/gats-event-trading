@@ -80,3 +80,21 @@ def test_redirected_windows_console_prints_rather_than_crashes(
     print("order of ₹72.77 crore")
     cp1252.flush()
     assert raw.getvalue().rstrip(b"\r\n") == b"order of ?72.77 crore"
+
+
+def test_paper_status_without_runs() -> None:
+    result = runner.invoke(app, ["paper", "status"])
+    assert result.exit_code == 0, result.stdout
+    assert "no paper runs yet" in result.stdout
+
+
+def test_paper_run_refuses_without_its_config() -> None:
+    result = runner.invoke(app, ["paper", "run", "--name", "s1"])  # no configs/ in this directory
+    assert result.exit_code == 1
+    assert "cannot load the paper system" in result.stdout
+
+
+def test_probe_upstox_intraday_needs_a_known_symbol() -> None:
+    result = runner.invoke(app, ["probe", "upstox-intraday", "--symbol", "NOSUCH"])
+    assert result.exit_code == 1
+    assert "no ISIN for NOSUCH" in result.stdout

@@ -1,0 +1,20 @@
+# Paper trading (T7.1): the system that `gats paper run` runs forward in time.
+#
+# Everything here is part of the run's design, and so is every file it
+# names. A changed value is a different system: it has to run as a new paper
+# run under a new name, because G3 compares one system with its backtest.
+# Paper capital is hypothetical; real capital is the human's decision (G4).
+strategy: configs/strategies/order_win_drift.yaml
+costs: configs/costs/india_equity.yaml
+risk: configs/risk.yaml
+source: NSE
+event_types: [ORDER_WIN]
+engine:
+  initial_cash: 1000000
+  notional_per_trade: 50000
+  # Decision to exchange only. In paper mode the time to fetch and read a
+  # filing is real and already inside the decision time, so what is left is
+  # the order's own transit. That cannot be measured before real orders
+  # exist (M8); one second is an assumption, and with one-minute bars an
+  # order can only fill in the next bar to start, whatever the value.
+  latency_s: 1.0

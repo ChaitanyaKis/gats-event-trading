@@ -114,6 +114,9 @@ del .env                             # back to real endpoints
 | `gats label sample` / `prepare` / `review` / `stats` | The labelled evaluation set: draw the held-out sample once, let the LLM answer in advance, check proposals against filings (see `labels/README.md`) |
 | `gats extract run --type ORDER_WIN --mode cascade [--limit N]` | Extract order value, counterparty, duration... (`rules`, `llm` or `cascade`; LLM modes need Ollama running) |
 | `gats backtest run --start D --end D [--holdout --prereg FILE]` | Backtest a strategy over stored events and bars; writes the G2 report |
+| `gats paper run --name NAME` | Paper trading: the backtest engine fed live (filings from the recorder, 1-minute bars from Upstox). Simulated fills only; it cannot send an order. Runs until Ctrl+C, resumes by name |
+| `gats paper status [--name NAME]` | What each paper run has taken, ordered and filled, and its measured feed and hand-over latency |
+| `gats probe upstox-intraday --symbol RELIANCE` | Today's candles as the paper runtime gets them: is the forming candle included, how late is a finished one |
 | `gats experiments list [--kind backtest]` | Research runs on record (logged before they start) and the number of distinct designs tried |
 | `gats inspect-bad [--limit N]` | Recent failed fetches and the payloads that failed to parse |
 | `gats version` | Installed version (check it after every update) |
@@ -154,6 +157,28 @@ burst of filings between polls leaves no permanent hole. For gaps older than
 - **Linux VM (recommended, e.g. Oracle Always Free):** see
   `deploy/gats-recorder.service` for a systemd unit with automatic restarts.
   Switch to Postgres with `pip install -e ".[postgres]"` and `GATS_DB_URL`.
+
+## Paper trading
+
+`gats paper run --name s1` runs the system in `configs/paper.yaml` forward
+in time, in its own terminal, next to the recorder:
+
+- **Same code as the backtest.** Filings become events through the same
+  functions, the same strategy object decides, the same risk rules veto, and
+  fills are the backtest's pessimistic model applied to live one-minute
+  bars. Paper results are therefore comparable with the backtest; they say
+  nothing about real slippage, which only real orders can measure.
+- **It cannot trade.** There is no broker order code in it. The Upstox
+  Analytics Token it uses is read-only.
+- **It restarts where it stopped.** Every input is journaled; a restart
+  replays the journal. If changed code or configuration would now decide
+  differently than the record, it refuses to resume: start a new run under
+  a new name.
+- **Stop new entries at any time** by creating the file `data/KILL`
+  (`New-Item data\KILL`); delete it to resume. Exits are never blocked.
+
+`gats paper status` shows what each run has done and the two latencies the
+intraday gate needs measured: exchange to recorder, recorder to strategy.
 
 ## Be a polite client
 

@@ -106,6 +106,7 @@ class ProbeTarget(StrEnum):
     instruments = "instruments"
     upstox_instruments = "upstox-instruments"
     upstox_candles = "upstox-candles"
+    upstox_intraday = "upstox-intraday"
     upstox_charges = "upstox-charges"
 
 
@@ -245,6 +246,8 @@ def probe(
         raise typer.Exit(asyncio.run(_probe_upstox_charges(settings, symbol, probes_dir)))
     if target in (ProbeTarget.upstox_instruments, ProbeTarget.upstox_candles):
         raise typer.Exit(asyncio.run(_probe_upstox(settings, target, when, symbol, probes_dir)))
+    if target is ProbeTarget.upstox_intraday:
+        raise typer.Exit(asyncio.run(_probe_upstox_intraday(settings, symbol, probes_dir)))
 
     async def main() -> int:
         async with _services(settings) as svc:
@@ -1851,16 +1854,13 @@ app.add_typer(backtest_app, name="backtest")
 
 
 def _load_strategy(path: Path) -> Any:
-    import yaml
+    from gats.strategy.catalog import load_strategy
 
-    from gats.strategy.order_win import OrderWinDrift
-
-    known = {OrderWinDrift.name: OrderWinDrift}
-    name = (yaml.safe_load(path.read_text(encoding="utf-8")) or {}).get("strategy")
-    if name not in known:
-        typer.echo(f"{path}: unknown strategy {name!r} (known: {', '.join(sorted(known))})")
-        raise typer.Exit(1)
-    return known[name].from_yaml(path)
+    try:
+        return load_strategy(path)
+    except ValueError as exc:
+        typer.echo(str(exc))
+        raise typer.Exit(1) from exc
 
 
 @backtest_app.command("run")
@@ -2251,3 +2251,207 @@ def research_magnitude(
     passed = [c.exit for c in family if c.passes]
     typer.echo(f"run {run_id}: {len(rows)} events -> {out / 'events.parquet'}")
     typer.echo(f"result: {'PASS at ' + ', '.join(passed) if passed else 'no pass'} -> {report}")
+
+
+async def _probe_upstox_intraday(settings: Settings, symbol: str, probes_dir: Path) -> int:
+    """Today's one-minute candles as the paper runtime gets them, and the
+    three things the docs leave open: is the candle still forming in the
+    reply, how soon does a finished one appear, what is served out of hours."""
+    from gats.marketdata.upstox import TokenMissing, auth_headers, key_for_symbol
+    from gats.sources import upstox
+
+    async with _services(settings) as svc:
+        with svc.engine.begin() as conn:
+            key = key_for_symbol(conn, symbol)
+        if key is None:
+            typer.echo(f"no ISIN for {symbol} yet: run `gats probe instruments` first")
+            return 1
+        try:
+            headers = auth_headers(svc)
+        except TokenMissing as exc:
+            typer.echo(str(exc))
+            return 1
+        asked_at = utcnow()
+        try:
+            got = await svc.client.get(
+                upstox.intraday_url(svc.settings.upstox_api_base, key), headers=headers
+            )
+        except FetchError as exc:
+            typer.echo(f"FETCH FAILED: {exc}")
+            return 1
+        stamp = asked_at.strftime("%Y%m%dT%H%M%SZ")
+        sample_path = probes_dir / f"upstox-intraday-{stamp}.json"
+        sample_path.write_bytes(got.content)
+        with svc.engine.begin() as conn:
+            repo.save_raw(
+                conn, svc.store, got.content, kind=upstox.INTRADAY_KIND, source=upstox.SOURCE,
+                url=got.url, content_type=got.content_type, fetched_at=got.fetched_at,
+                meta={"instrument_key": key, "http_status": got.status},
+            )  # fmt: skip
+    typer.echo(f"url:          {got.url}")
+    typer.echo(f"http status:  {got.status}")
+    typer.echo(f"size:         {len(got.content):,} bytes  ({got.elapsed_ms} ms)")
+    typer.echo(f"saved to:     {sample_path}")
+    typer.echo(f"asked at:     {to_ist(asked_at):%Y-%m-%d %H:%M:%S} IST")
+    if not got.ok:
+        typer.echo(f"first bytes:  {got.content[:300]!r}")
+        return 1
+    try:
+        bars = upstox.parse_candles(got.content, instrument_key=key).records
+    except PayloadError as exc:
+        typer.echo(f"PARSE FAILED: {exc}")
+        return 1
+    if not bars:
+        typer.echo("candles:      none (before the open, or a day without a session?)")
+        return 0
+    first, last = bars[0], bars[-1]
+    days = sorted({to_ist(bar.ts).date() for bar in bars})
+    typer.echo(
+        f"candles:      {len(bars)} from {to_ist(first.ts):%Y-%m-%d %H:%M} to "
+        f"{to_ist(last.ts):%Y-%m-%d %H:%M} IST ({len(days)} day(s): "
+        f"{', '.join(d.isoformat() for d in days)})"
+    )
+    closes_at = last.ts + timedelta(minutes=1)
+    if closes_at > asked_at:
+        left = (closes_at - asked_at).total_seconds()
+        typer.echo(f"last candle:  STILL FORMING ({left:.0f} s of its minute left when asked)")
+        if len(bars) > 1:
+            age = (asked_at - (bars[-2].ts + timedelta(minutes=1))).total_seconds()
+            typer.echo(f"newest finished candle closed {age:.0f} s before the question")
+    else:
+        age = (asked_at - closes_at).total_seconds()
+        typer.echo(f"last candle:  finished; it closed {age:.0f} s before the question")
+    typer.echo(
+        "Run this a few times in a session (just after a minute turns), once before 09:15 and "
+        "once after 15:30: the answers set GATS_PAPER_BAR_MARGIN_S and go in DATA_SOURCES.md."
+    )
+    return 0
+
+
+paper_app = typer.Typer(
+    no_args_is_help=True,
+    help="Paper trading (M7): simulated fills on live data. No order is ever sent to a broker.",
+)
+app.add_typer(paper_app, name="paper")
+
+
+@paper_app.command("run")
+def paper_run(
+    name: Annotated[str, typer.Option(help="The run's name. A changed design needs a new name.")],
+    config: Annotated[
+        Path | None, typer.Option(help="Paper config (default: configs/paper.yaml).")
+    ] = None,
+) -> None:
+    """Run the paper runtime until Ctrl+C. The recorder must be running too:
+    it is the only source of filings."""
+    from gats.marketdata.upstox import TokenMissing, auth_headers
+    from gats.runtime.journal import DesignChanged, Diverged
+    from gats.runtime.paper import PaperRuntime, load_system, run_paper
+
+    settings = _settings()
+    path = config or settings.paper_config_path
+    try:
+        system = load_system(path, settings)
+    except (OSError, ValueError) as exc:  # a missing file, or one that does not validate
+        typer.echo(f"cannot load the paper system from {path}: {exc}")
+        raise typer.Exit(1) from exc
+
+    async def main() -> int:
+        stop = asyncio.Event()
+        if sys.platform != "win32":  # Windows has no loop signal handlers; Ctrl+C still works
+            loop = asyncio.get_running_loop()
+            for sig in (signal.SIGTERM, signal.SIGINT):
+                loop.add_signal_handler(sig, stop.set)
+        async with _services(settings) as svc:
+            try:
+                auth_headers(svc)
+                runtime = PaperRuntime(svc, system, name)
+                run = runtime.run
+                typer.echo(
+                    f"paper run {name!r}: design {system.design_hash}, {system.strategy.version}; "
+                    f"{len(run.events)} filings, {len(run.engine.orders)} orders and "
+                    f"{len(run.engine.executions)} fills so far. Ctrl+C stops it."
+                )
+                await run_paper(svc, runtime, stop)
+            except (TokenMissing, DesignChanged, Diverged) as exc:
+                typer.echo(f"REFUSED: {exc}")
+                return 1
+        return 0
+
+    try:
+        code = asyncio.run(main())
+    except KeyboardInterrupt:
+        typer.echo("paper run stopped")
+        return
+    raise typer.Exit(code)
+
+
+@paper_app.command("status")
+def paper_status(
+    name: Annotated[
+        str | None, typer.Option(help="One run in detail (default: list the runs).")
+    ] = None,
+) -> None:
+    """What the paper runs have done, from the stored journal, orders and fills."""
+    from gats.runtime.status import Latency, run_status, runs
+
+    settings = _settings(log_to_file=False)
+    db = make_engine(settings.resolved_db_url)
+    init_db(db)
+    with db.begin() as conn:
+        listed = runs(conn)
+        chosen = [r.name for r in listed if name is None or r.name == name]
+        statuses = [run_status(conn, n) for n in chosen]
+    db.dispose()
+    if not listed:
+        typer.echo("no paper runs yet: start one with `gats paper run --name <name>`")
+        return
+    if name is not None and not chosen:
+        typer.echo(f"no paper run called {name!r} (runs: {', '.join(r.name for r in listed)})")
+        raise typer.Exit(1)
+
+    def shown(lat: Latency | None) -> str:
+        if lat is None:
+            return "not measured yet"
+        return (
+            f"median {lat.median_s:.0f} s, p95 {lat.p95_s:.0f} s, worst {lat.worst_s:.0f} s "
+            f"(n={lat.n})"
+        )
+
+    for status in statuses:
+        assert status is not None
+        steps, orders = status.steps, status.orders
+        last = (
+            f"{to_ist(status.last_step_at):%Y-%m-%d %H:%M:%S} IST" if status.last_step_at else "-"
+        )
+        typer.echo(
+            f"{status.name}: design {status.design_hash}, {status.strategy}, since "
+            f"{to_ist(status.created_at):%Y-%m-%d %H:%M} IST"
+        )
+        typer.echo(
+            f"  taken:    {steps['event']} filings, {steps['bar']:,} bars, {steps['ref']} "
+            f"reference prices, {steps['close']} day closes; last {last}"
+        )
+        typer.echo(
+            f"  orders:   {sum(orders.values())} ({orders['filled']} filled, {orders['working']} "
+            f"working, {orders['expired']} expired, {orders['rejected']} rejected)"
+        )
+        for reason, n in status.refusals.most_common(6):
+            typer.echo(f"            rejected, {reason}: {n}")
+        typer.echo(
+            f"  fills:    {status.fills}; bought Rs {status.bought:,.0f}, sold Rs "
+            f"{status.sold:,.0f}, charges Rs {status.charges:,.2f}"
+        )
+        held = ", ".join(f"{key} x {n}" for key, n in sorted(status.open_quantity.items()))
+        typer.echo(f"  holding:  {held or 'nothing'}")
+        typer.echo(f"  feed latency (exchange to recorder):    {shown(status.feed)}")
+        typer.echo(f"  hand-over latency (recorder to strategy): {shown(status.hand_over)}")
+    beat = settings.paper_heartbeat_path
+    if beat.exists():
+        state = json.loads(beat.read_text(encoding="utf-8")).get("jobs", {}).get("paper", {})
+        typer.echo(
+            f"runtime: run {state.get('run')!r} last ticked {state.get('last_ok_at', 'never')}"
+            + (f"; last error {state['last_error']}" if state.get("last_error") else "")
+        )
+    else:
+        typer.echo("runtime: not running (no heartbeat file)")

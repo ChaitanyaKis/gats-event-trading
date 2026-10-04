@@ -22,9 +22,9 @@ from gats.ingest import Outcome, Services
 from gats.recorder import (
     HandOffJob,
     NseAnnouncementsJob,
-    _sleep_or_stop,
     build_jobs,
     run_job_loop,
+    sleep_or_stop,
 )
 from gats.refdata import master
 from gats.sources.models import AnnouncementRecord, InstrumentRecord
@@ -183,10 +183,10 @@ async def test_new_filings_wake_the_hand_off_at_once(svc: Services) -> None:
     assert nse.notify.is_set()
 
     stop = asyncio.Event()
-    await asyncio.wait_for(_sleep_or_stop(stop, 3600, nse.notify), 1)  # woken, not timed out
+    await asyncio.wait_for(sleep_or_stop(stop, 3600, nse.notify), 1)  # woken, not timed out
     stop.set()
-    await asyncio.wait_for(_sleep_or_stop(stop, 3600, asyncio.Event()), 1)  # stopping also ends it
-    await asyncio.wait_for(_sleep_or_stop(asyncio.Event(), 0.01, asyncio.Event()), 1)  # the timer
+    await asyncio.wait_for(sleep_or_stop(stop, 3600, asyncio.Event()), 1)  # stopping also ends it
+    await asyncio.wait_for(sleep_or_stop(asyncio.Event(), 0.01, asyncio.Event()), 1)  # the timer
     assert job.interval_s(svc.clock()) == svc.settings.handoff_fallback_s
 
 

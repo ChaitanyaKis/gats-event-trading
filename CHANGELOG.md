@@ -3,6 +3,18 @@
 ## Unreleased
 Schema v10 (new tables only), upgraded automatically.
 
+- **Paper trading:** `gats paper run --name NAME` runs the configured
+  system (`configs/paper.yaml`) forward in time: filings from the recorder,
+  one-minute bars from Upstox, the backtest's strategy, risk rules and fill
+  model. It cannot send orders. It resumes by name after a restart and
+  refuses to resume if changed code or configuration would rewrite its
+  record. `gats paper status` shows each run and its measured latencies;
+  `gats probe upstox-intraday` checks the live candle feed. Creating
+  `data/KILL` stops new entries.
+- **Faster hand-off in the recorder:** new filings are typed and linked the
+  moment they are stored, and order wins on NSE get their attachment fetched
+  and read at once instead of waiting for the batch timers (settings
+  `GATS_HANDOFF_*`).
 - **One-minute bars (groundwork):** `gats probe upstox-instruments` reads
   Upstox's public instrument file; with the read-only Analytics Token in
   `.env` (`GATS_UPSTOX_ANALYTICS_TOKEN`), `gats bars fetch` stores
