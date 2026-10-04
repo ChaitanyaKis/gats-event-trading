@@ -1,8 +1,20 @@
 # Changelog
 
 ## Unreleased
-Schema v10 (new tables only), upgraded automatically.
+Schema v11 (new tables only), upgraded automatically.
 
+- **Gate G3 report:** `gats paper report --name NAME` judges a paper run
+  against a backtest of its own filings and bars, by criteria fixed in
+  `configs/g3.yaml`, and writes `reports/M7_paper.md`.
+- **Alerts:** with `GATS_TELEGRAM_BOT_TOKEN` and `GATS_TELEGRAM_CHAT_ID` in
+  `.env`, the paper runtime sends signals, refusals, fills, errors and a
+  daily summary to Telegram.
+- **Live pilot (off, human-only):** `gats gate status|approve|revoke` and
+  `gats live`. Live trading stays impossible until a person switches it on,
+  sets the caps in `configs/live.yaml` and approves the design at a
+  terminal after gate G3. See `docs/RUNBOOK_LIVE.md`.
+- **Operations:** `docs/OPS.md`, `deploy/gats-paper.service`,
+  `scripts/run_paper.ps1`, `scripts/backup.sh`.
 - **Paper trading:** `gats paper run --name NAME` runs the configured
   system (`configs/paper.yaml`) forward in time: filings from the recorder,
   one-minute bars from Upstox, the backtest's strategy, risk rules and fill

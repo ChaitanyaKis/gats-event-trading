@@ -1,0 +1,23 @@
+# Gate G3 (T7.5): how a paper run is judged against the backtest.
+#
+# Written before any paper data exists, on purpose: tolerances chosen after
+# seeing the results would not be a test. These values are PROPOSED by
+# Claude (2026-10-04). The human confirms or changes them BEFORE the paper
+# run starts; after that they are fixed for that run.
+#
+# DESIGN.md, gate G3: "at least 2 months live paper: signal count, fill rate
+# and slippage within tolerance of the backtest, and net expectancy CI not
+# below zero."
+version: g3-v1
+min_days: 60                    # calendar days from the run's first step to its last
+min_trades: 30                  # closed trades: fewer says too little either way
+signal_count_tolerance: 0.20    # paper entries may differ from the backtest's by 20%
+fill_rate_tolerance: 0.10       # filled share of entries: within 10 percentage points
+slippage_tolerance_bps: 10      # paper's mean entry slippage may exceed the backtest's by this
+# The backtest side replays the paper run's own filings and bars the way
+# G2's backtest sees them: each filing at the moment it became available,
+# plus this assumed delay to the market (the value G2 was run with).
+backtest_latency_s: 5.0
+confidence: 0.95                # of the bootstrap interval for net rupees per trade
+bootstrap_resamples: 10000
+bootstrap_seed: 20261004

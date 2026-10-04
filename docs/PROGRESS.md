@@ -4,8 +4,8 @@ Claude Code updates this after every task. Newest log entry first.
 
 ## Status
 
-- **Version:** 0.2.0 · **Schema:** v10 · **Milestone:** M3 (M1 waits only on T1.6, HUMAN)
-- **Next up:** M7 T7.1 paper runtime, in progress: engine stepping and the journal are done; next the recorder's fast hand-off, live bars (Upstox intraday candles), the runtime loop with a full-session test, the mock exchange. Then learning notes for the code-complete milestones. T5.3 waits for live latency (recorder, item 1). Waiting on the human: recorder (1), M3 run (3), labels (5), Upstox token (6)
+- **Version:** 0.2.0 · **Schema:** v11 · **Milestone:** M3 (M1 waits only on T1.6, HUMAN)
+- **Next up:** VERIFY FIRST (next session), then the open items below. M4 to M8 are code-complete; every real run waits on the human. Open code items, in order: (a) T7.1 acceptance: a full session over `scripts/mock_exchange.py` (the in-process full-session test passes; the mock exchange does not serve candles or PDFs yet); (b) a recorder job that keeps quarterly results fresh (today only `gats backfill results`; stale revenue makes paper differ from a later backtest); (c) filings on non-trading days are not traded by the engine in backtest or paper (decide before the G1b pre-registration); (d) learning notes M3 to M8; (e) `run_live` has only been tested in parts. Waiting on the human: recorder (1), M3 run (3), labels (5), Upstox token (6), items 8 to 12
 
 ## Waiting on the human (HUMAN)
 
@@ -96,6 +96,44 @@ are PowerShell, run from `C:\Projects\GATS`.
    ```
    Rerun the same command until it prints `XBRL: 0 read`.
 
+8. **T7.5 Confirm the G3 criteria BEFORE paper trading starts.** Open
+   `configs/g3.yaml` (five numbers Claude proposed: 60 days, 30 trades,
+   signals within 20%, fill rate within 10 points, slippage within 10 bps).
+   Change them now if you disagree and tell Claude; once the paper run has
+   produced data they are fixed.
+
+9. **T7.3 Telegram alerts** (5 minutes). In Telegram, talk to `@BotFather`,
+   send `/newbot`, follow it, copy the token. Send any message to your new
+   bot, then open `https://api.telegram.org/bot<token>/getUpdates` in a
+   browser and copy `chat.id`. Add to `C:\Projects\GATS\.env`:
+   ```
+   GATS_TELEGRAM_BOT_TOKEN=<token>
+   GATS_TELEGRAM_CHAT_ID=<chat id>
+   ```
+
+10. **T7.1 One real day of paper trading** (after items 1 and 6, on a
+    trading day). First measure the live candle feed (run it a few times
+    just after a minute turns, once before 09:15, once after 15:30, and send
+    Claude the output):
+    ```powershell
+    cd C:\Projects\GATS
+    .venv\Scripts\gats probe upstox-intraday --symbol RELIANCE
+    ```
+    Then start the paper run in its own terminal, next to the recorder:
+    ```powershell
+    powershell -ExecutionPolicy Bypass -File scripts\run_paper.ps1 -Name s1
+    .venv\Scripts\gats paper status      # any time, in another terminal
+    ```
+    It cannot send an order. `New-Item data\KILL` stops new entries.
+
+11. **T7.4 Always-on VM.** `docs/OPS.md` has the steps (provision, move
+    `data\`, `.env`, two systemd units, nightly backup). Two months of paper
+    trading on a laptop that sleeps is two months of gaps.
+
+12. **M8 Live pilot: yours alone.** `docs/RUNBOOK_LIVE.md`. Nothing is
+    switched on. Claude never runs `gats live` or `gats gate approve`, and
+    never sets the caps in `configs/live.yaml`.
+
 ## Blocked
 
 (none)
@@ -109,8 +147,8 @@ are PowerShell, run from `C:\Projects\GATS`.
 - [ ] M4 LLM extraction (infrastructure for ORDER_WIN; scope confirmed at G1): T4.1 ✅ · T4.2 ✅ · T4.3 ✅ · T4.4 ✅ · T4.5 ⏳ (code ✅; labels: human) · T4.6 ⏳ (code ✅; needs the labels) · T4.7 ⏳ (pre-registered; code ✅; the run needs items 3, 5 and 7)
 - [ ] M5 Intraday data & reaction curves (G1b): T5.1 ⏳ (code ✅; token: human, item 6) · T5.2 ⏳ (code ✅; the fetch needs the token) · T5.3 ⏳ (pre-registered; code ✅; the run needs bars and recorder latency) · T5.4 ⏳ (gate)
 - [ ] M6 Backtester (G2): T6.1 ⏳ (model ✅; broker-calculator check needs the token, item 6) · T6.2 ✅ · T6.3 ✅ · T6.4 ✅ · T6.5 ✅ · T6.6 ✅ · T6.7 ✅ · T6.8 ⏳ (code ✅; the G2 run needs bars, events and T4.7's revenue feature)
-- [ ] M7 Paper trading (G3): T7.1 ⏳ (in progress)
-- [ ] M8 Live pilot (G4, human-only)
+- [ ] M7 Paper trading (G3): T7.1 ⏳ (code ✅; mock-exchange session open; the real day: human, item 10) · T7.2 ⏳ [ASK] (measured by `gats paper status`; needs live data) · T7.3 ⏳ (code ✅; bot: human, item 9) · T7.4 ⏳ (scripts and docs ✅; VM: human, item 11) · T7.5 ⏳ (report code ✅; needs two months of paper)
+- [ ] M8 Live pilot (G4, human-only): T8.1 ✅ (off by default; order API documented, never called) · T8.2 ✅ · T8.3 ✅ · T8.4 ✅ · G4: the human's
 
 ## Tasks done
 
@@ -121,6 +159,28 @@ are PowerShell, run from `C:\Projects\GATS`.
   deeper catch-up, `inspect-bad` (0.1.2)
 
 ## Log
+
+- **2026-10-04:**
+  - M8 code (T8.1 to T8.4), all off. Three locks with no bypass: `GATS_LIVE_ENABLED`
+    (false), a human's approval row bound to the design hash, the caps hash and the hash
+    of a G3 report that says PASS (`gats gate approve`: interactive terminal and a typed
+    sentence naming the capital at risk), and hard rupee caps in `configs/live.yaml`
+    (shipped as 0 = not set; the human's numbers). Order layer: intent stored before
+    sending, one key per engine order (never sent twice), a request with no answer is
+    never resent and switches trading off, fills reconciled with the broker's positions.
+    Upstox order API read from the docs, never called; LIMIT orders only. Tests prove
+    `gats live` and `gats gate approve` refuse. `docs/RUNBOOK_LIVE.md`.
+  - T7.5 G3 report (`gats paper report`): the run against a backtest of its own filings
+    and bars, criteria in `configs/g3.yaml` fixed beforehand; writes the `**G3: PASS**`
+    line the live gate reads. T7.3 alerts (Telegram; token kept out of logs). T7.4
+    `docs/OPS.md`, `deploy/gats-paper.service`, `scripts/run_paper.ps1`, `scripts/backup.sh`.
+  - T7.1 paper runtime: live bars (Upstox intraday candles, documented, unprobed), live
+    events through the backtest's own code, the run loop, `gats paper run|status`,
+    `gats probe upstox-intraday`. A full fake-clock session passes (real PDF, entry,
+    timed exit, day close, restart mid-session identical). The recorder's hand-off job
+    takes a new order win to readable text at once.
+  - Not verified by a real run (next session and human steps): anything against Upstox
+    with a token, a real trading day, the live order path.
 
 - **2026-10-03:**
   - T7.1 (part 1) the paper run's journal. The paper runtime is the backtest engine fed

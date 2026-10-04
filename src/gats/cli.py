@@ -2628,3 +2628,44 @@ def live(
         typer.echo("live run stopped")
         return
     raise typer.Exit(code)
+
+
+@paper_app.command("report")
+def paper_report(
+    name: Annotated[str, typer.Option(help="The paper run to judge.")],
+    criteria: Annotated[Path, typer.Option(help="The G3 criteria.")] = Path("configs/g3.yaml"),
+    out: Annotated[Path | None, typer.Option(help="Where to write the report.")] = None,
+) -> None:
+    """Write the G3 report: the paper run against the backtest of the same
+    filings and bars, judged by criteria fixed before the run."""
+    from gats.runtime import g3
+    from gats.runtime.journal import DesignChanged, Diverged
+    from gats.runtime.paper import load_system
+    from gats.runtime.status import runs
+
+    settings = _settings()
+    try:
+        spec = g3.load_spec(criteria)
+        system = load_system(settings.paper_config_path, settings)
+    except (OSError, ValueError) as exc:
+        typer.echo(f"cannot load the G3 criteria or the paper system: {exc}")
+        raise typer.Exit(1) from exc
+    db = make_engine(settings.resolved_db_url)
+    init_db(db)
+    try:
+        with db.begin() as conn:
+            if name not in {r.name for r in runs(conn)}:
+                typer.echo(f"no paper run called {name!r}")
+                raise typer.Exit(1)
+            text, checks = g3.build_report(conn, system, name, spec, utcnow())
+    except (DesignChanged, Diverged) as exc:
+        typer.echo(f"REFUSED: {exc}")
+        raise typer.Exit(1) from exc
+    finally:
+        db.dispose()
+    path = out or settings.g3_report_path
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8", newline="\n")
+    for check in checks:
+        typer.echo(f"  {'pass' if check.passed else 'FAIL'}  {check.name}: {check.detail}")
+    typer.echo(f"G3: {g3.verdict(checks)} -> {path} (the decision at the gate is the human's)")

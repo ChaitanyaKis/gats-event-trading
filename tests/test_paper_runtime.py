@@ -32,7 +32,9 @@ from gats.db.schema import (
     surveillance_versions,
 )
 from gats.ingest import Services
+from gats.oms import gate
 from gats.recorder import HandOffJob, build_jobs
+from gats.runtime import g3
 from gats.runtime.journal import DesignChanged, Diverged
 from gats.runtime.paper import PaperRuntime, System, TickReport, load_system, run_paper
 from gats.runtime.status import Latency, latency, run_status, runs
@@ -458,3 +460,53 @@ async def test_the_loop_survives_a_failed_tick_and_stops_for_a_broken_record(
     monkeypatch.setattr(runtime, "tick", broken)
     with pytest.raises(Diverged):  # no retry can make a changed system the same one
         await asyncio.wait_for(run_paper(svc, runtime, asyncio.Event()), 5)
+
+
+@respx.mock
+async def test_the_g3_report_judges_the_run_against_its_own_backtest(
+    svc: Services, clock: FakeClock, broker: Broker, system: System, tmp_path: Path
+) -> None:
+    mock_http(svc, broker)
+    runtime = PaperRuntime(svc, system, "g3")
+    await run_session(
+        {"g3": runtime}, clock, at(9, 10), at(15, 36), {at(10, 0, 30): lambda: file_order_win(svc)}
+    )
+    shipped = g3.load_spec(ROOT / "configs" / "g3.yaml")
+    assert (shipped.min_days, shipped.min_trades, shipped.backtest_latency_s) == (60, 30, 5.0)
+    with svc.engine.begin() as conn:
+        text, checks = g3.build_report(conn, system, "g3", shipped, at(16, 0))
+    assert g3.verdict(checks) == "FAIL" and "**G3: FAIL**" in text  # one day is not two months
+    failed = [c.name for c in checks if not c.passed]
+    assert failed == ["at least 60 days of paper trading", "at least 30 closed trades"]
+    by_name = {c.name: c for c in checks}
+    assert by_name["signal count within 20% of the backtest"].detail == "paper 1, backtest 1"
+    assert by_name["fill rate within 10% of the backtest"].detail == "paper 100.0%, backtest 100.0%"
+    assert "| Entry orders sent | 1 | 1 |" in text and "| Closed trades | 1 | 1 |" in text
+
+    lenient = shipped.model_copy(update={"min_days": 1, "min_trades": 1})
+    with svc.engine.begin() as conn:
+        text, checks = g3.build_report(conn, system, "g3", lenient, at(16, 0))
+    assert g3.verdict(checks) == "PASS"
+    report = tmp_path / "M7_paper.md"
+    report.write_text(text, encoding="utf-8", newline="\n")
+    assert gate.g3_verdict(report) == "PASS"  # the line the live gate reads
+
+
+def test_expectancy_interval_and_a_losing_run() -> None:
+    spec = g3.load_spec(ROOT / "configs" / "g3.yaml").model_copy(
+        update={"min_days": 0, "min_trades": 1, "bootstrap_resamples": 500}
+    )
+    assert g3.expectancy_interval([], [], spec) is None
+    days = [date(2026, 10, d) for d in (5, 5, 6, 7, 8, 9)]
+    mean, low, high = g3.expectancy_interval([-50.0, -40.0, -60.0, -45.0, -55.0, -50.0], days, spec)  # type: ignore[misc]
+    assert mean == -50.0 and low < mean < high < 0
+    losing = g3.Side(entries=6, filled=6, slippage_bps=12.0, nets=[-50.0] * 6, days=days)
+    same = g3.Side(entries=6, filled=6, slippage_bps=12.0, nets=[-50.0] * 6, days=days)
+    checks = g3.judge(losing, same, 90, spec)
+    assert g3.verdict(checks) == "FAIL"
+    assert [c.name for c in checks if not c.passed] == [
+        "net expectancy: lower end of the 95% interval not below zero"
+    ]
+    fewer = g3.Side(entries=4, filled=2, slippage_bps=30.0, nets=[10.0], days=days[:1])
+    names = [c.name for c in g3.judge(fewer, same, 90, spec) if not c.passed]
+    assert len(names) == 3 and "signal count" in names[0] and "slippage" in names[2]
