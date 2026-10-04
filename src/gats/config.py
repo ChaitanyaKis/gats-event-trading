@@ -105,6 +105,11 @@ class Settings(BaseSettings):
     attachments_poll_s: float = Field(default=60.0, gt=0)
     attachments_batch: int = Field(default=20, ge=1)
     attachments_max_attempts: int = Field(default=5, ge=1)
+    # The recorder fetches attachments of filings this recent on its own.
+    # Older ones (a backfill adds a million) are fetched only when asked for
+    # (`gats extract fetch --type ...`): at about 0.8 MB each they would fill
+    # a disk in days.
+    attachments_max_age_days: int = Field(default=7, ge=1)
     # Storage policy, not a research filter: every attachment URL is kept, so
     # anything skipped can be fetched later. Downloading every PDF costs
     # gigabytes per day (annual reports, presentations).

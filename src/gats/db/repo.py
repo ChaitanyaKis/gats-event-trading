@@ -11,7 +11,7 @@ from dataclasses import asdict
 from datetime import date, datetime, timedelta
 from typing import Any, Literal
 
-from sqlalchemy import Connection, Row, Table, func, select, update
+from sqlalchemy import Connection, Row, Table, func, select, true, update
 from sqlalchemy.dialects import postgresql, sqlite
 
 from gats.db.schema import (
@@ -318,7 +318,12 @@ def reparse_announcements(
     return updated, len(inserted)
 
 
-def pending_attachments(conn: Connection, limit: int, max_attempts: int) -> list[Row[Any]]:
+def pending_attachments(
+    conn: Connection, limit: int, max_attempts: int, since: datetime | None = None
+) -> list[Row[Any]]:
+    """Attachments still to download, newest filing first; with ``since``
+    only those of filings at least that recent."""
+    recent = true() if since is None else announcements.c.event_ts >= since
     return list(
         conn.execute(
             select(
@@ -333,6 +338,7 @@ def pending_attachments(conn: Connection, limit: int, max_attempts: int) -> list
             .where(
                 announcements.c.attachment_status.in_(("pending", "failed")),
                 announcements.c.attachment_attempts < max_attempts,
+                recent,
             )
             .order_by(announcements.c.event_ts.desc())
             .limit(limit)

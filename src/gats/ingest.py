@@ -7,7 +7,7 @@ import asyncio
 import logging
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Any
 
 from sqlalchemy import Connection, Engine, Table
@@ -853,16 +853,21 @@ async def download_attachment(svc: Services, row: Any, *, job: str, max_bytes: i
 
 
 async def fetch_pending_attachments(svc: Services, *, job: str) -> Outcome:
-    """Download queued attachments that pass the storage policy.
+    """Download queued attachments of recent filings that pass the storage
+    policy.
 
     Policy skips cost no requests, so a wider slice of the queue is scanned
-    than the download budget (``attachments_batch``) allows.
+    than the download budget (``attachments_batch``) allows. Filings older
+    than ``attachments_max_age_days`` are left alone: after a backfill the
+    queue holds years of history, which is fetched only on request
+    (:func:`fetch_attachments_for`).
     """
     settings = svc.settings
     max_bytes = int(settings.attachments_max_mb * 1024 * 1024)
+    since = svc.clock() - timedelta(days=settings.attachments_max_age_days)
     with svc.engine.begin() as conn:
         rows = repo.pending_attachments(
-            conn, settings.attachments_batch * 10, settings.attachments_max_attempts
+            conn, settings.attachments_batch * 10, settings.attachments_max_attempts, since
         )
     total = Outcome(ok=True)
     downloads = 0

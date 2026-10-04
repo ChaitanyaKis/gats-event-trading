@@ -11,6 +11,7 @@ import httpx
 import respx
 from sqlalchemy import select
 
+from gats import ingest
 from gats.db import repo
 from gats.db.schema import (
     announcement_event_types,
@@ -224,3 +225,26 @@ def test_hand_off_can_be_switched_off(svc: Services) -> None:
     assert not any(isinstance(j, HandOffJob) for j in jobs)
     (nse,) = [j for j in jobs if isinstance(j, NseAnnouncementsJob)]
     assert nse.notify is None
+
+
+@respx.mock
+async def test_the_queue_downloads_recent_filings_only_and_history_on_request(
+    svc: Services,
+) -> None:
+    """After a backfill the queue holds years of filings. On 2026-10-04 the
+    recorder started downloading them all, about a gigabyte an hour."""
+    now = svc.clock()
+    recent = filing(svc, 1, seen=now - timedelta(days=2), mode="backfill")
+    history = filing(svc, 2, seen=now - timedelta(days=400), mode="backfill")
+    respx.get(svc.settings.nse_home_url).mock(return_value=httpx.Response(200))
+    new = respx.get(f"{BASE}1.pdf").mock(return_value=httpx.Response(200, content=PDF))
+    old = respx.get(f"{BASE}2.pdf").mock(return_value=httpx.Response(200, content=PDF))
+
+    outcome = await ingest.fetch_pending_attachments(svc, job="attachments")
+    assert outcome.n_new == 1 and (new.call_count, old.call_count) == (1, 0)
+    got = state(svc)
+    assert got[recent][1] == "done" and got[history][1] == "pending"  # still fetchable
+
+    asked = await ingest.fetch_attachments_for(svc, [history], job="extract_fetch", limit=10)
+    assert asked.n_new == 1 and old.call_count == 1 and state(svc)[history][1] == "done"
+    assert svc.settings.attachments_max_age_days == 7
